@@ -2,80 +2,80 @@
 
 # 取引戦略パラメータ
 strategy:
-  # N秒前の価格と比較（N=1の場合は1秒前と直接比較）
-  price_comparison_seconds: 1
-  
-  # 上昇トリガー閾値（X%）
-  long_threshold_percent: 2.0
-  
-  # 下落トリガー閾値（Y%）
-  short_threshold_percent: 2.0
-  
-  # 利確判定の反発閾値（Z%）- オープン後の最高値/最安値からの逆行率
-  reversal_threshold_percent: 1.5
-  
-  # 最小利益率（M%）- この利益を一度も超えていない場合は反発閾値に達しても決済しない
-  min_profit_percent: 3.0
+    # N秒前の価格と比較（N=1の場合は1秒前と直接比較）
+    price_comparison_seconds: 1
+
+    # 上昇トリガー閾値（X%）
+    long_threshold_percent: 2.0
+
+    # 下落トリガー閾値（Y%）
+    short_threshold_percent: 2.0
+
+    # 利確判定の反発閾値（Z%）- オープン後の最高値/最安値からの逆行率
+    reversal_threshold_percent: 1.5
+
+    # 最小利益率（M%）- この利益を一度も超えていない場合は反発閾値に達しても決済しない
+    min_profit_percent: 3.0
 
 # ポジション管理
 position:
-  # 全資産に対する使用比率（α%）
-  capital_usage_percent: 10.0
-  
-  # 同時保有可能な最大銘柄数
-  max_concurrent_positions: 3
-  
-  # クロスマージン切替閾値（USDT）
-  cross_margin_threshold: 1000.0
-  
-  # 2倍逆行時の最大損失率（%）
-  max_loss_on_2x_reversal: 10.0
+    # 全資産に対する使用比率（α%）
+    capital_usage_percent: 10.0
+
+    # 同時保有可能な最大銘柄数
+    max_concurrent_positions: 3
+
+    # クロスマージン切替閾値（USDT）
+    cross_margin_threshold: 1000.0
+
+    # 2倍逆行時の最大損失率（%）
+    max_loss_on_2x_reversal: 10.0
 
 # データ管理
 data:
-  # ティックデータ保持時間（時間）
-  tick_data_retention_hours: 6
-  
-  # データ保存間隔（秒）
-  save_interval_seconds: 60
+    # ティックデータ保持時間（時間）
+    tick_data_retention_hours: 6
+
+    # データ保存間隔（秒）
+    save_interval_seconds: 60
 
 # MEXC API設定
 mexc:
-  # WebSocket URL
-  ws_url: "wss://contract.mexc.com/ws"
-  
-  # REST API URL
-  api_url: "https://contract.mexc.com"
-  
-  # 再接続設定
-  reconnect_interval: 5
-  max_reconnect_attempts: 10
-  ping_interval: 30
+    # WebSocket URL
+    ws_url: "wss://contract.mexc.com/ws"
+
+    # REST API URL
+    api_url: "https://contract.mexc.com"
+
+    # 再接続設定
+    reconnect_interval: 5
+    max_reconnect_attempts: 10
+    ping_interval: 30
 
 # QuestDB設定
 questdb:
-  host: "questdb"
-  port: 9000
-  ilp_port: 9009
-  
-  # テーブル名
-  tick_table: "tick_data"
-  trade_table: "trade_records"
+    host: "questdb"
+    port: 9000
+    ilp_port: 9009
+
+    # テーブル名
+    tick_table: "tick_data"
+    trade_table: "trade_records"
 
 # ログ設定
 logging:
-  level: "INFO"
-  file: "trade_mini.log"
-  max_size_mb: 10
-  backup_count: 5
+    level: "INFO"
+    file: "trade_mini.log"
+    max_size_mb: 10
+    backup_count: 5
 
 # リスク管理
 risk:
-  # 強制停止条件（連続損失回数）
-  max_consecutive_losses: 5
-  
-  # 1日の最大取引回数
-  max_trades_per_day: 50
-  
-  # 最小注文サイズ（USDT）
-  min_order_size: 10.0
+    # 強制停止条件（連続損失回数）
+    max_consecutive_losses: 5
+
+    # 1日の最大取引回数
+    max_trades_per_day: 50
+
+    # 最小注文サイズ（USDT）
+    min_order_size: 10.0
