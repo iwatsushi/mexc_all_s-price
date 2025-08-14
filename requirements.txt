@@ -1,0 +1,33 @@
+# Web関連
+requests>=2.31.0
+websockets>=11.0.3
+aiohttp>=3.8.5
+
+# データ処理
+pandas>=2.1.0
+numpy>=1.24.0
+
+# 設定・YAML
+pyyaml>=6.0.1
+python-dotenv>=1.0.0
+
+# 非同期処理
+asyncio-throttle>=1.0.2
+
+# QuestDB接続
+questdb>=1.1.0
+
+# ログ
+loguru>=0.7.0
+
+# 型ヒント
+typing-extensions>=4.7.1
+
+# 日時処理
+python-dateutil>=2.8.2
+
+# 暗号化（MEXC API署名用）
+cryptography>=41.0.0
+
+# JSON処理
+ujson>=5.8.0

@@ -1,0 +1,117 @@
+version: '3.8'
+
+services:
+  # QuestDB データベース
+  questdb:
+    image: questdb/questdb:7.3.10
+    container_name: trade-mini-questdb
+    ports:
+      - "9000:9000"    # HTTP/Console
+      - "9009:9009"    # InfluxDB Line Protocol
+      - "8812:8812"    # PostgreSQL
+    volumes:
+      - questdb_data:/var/lib/questdb
+      - ./questdb.conf:/var/lib/questdb/conf/server.conf:ro
+    environment:
+      - QDB_LOG_W_FILE_LOCATION=/var/lib/questdb/log
+      - QDB_PG_USER=admin
+      - QDB_PG_PASSWORD=quest
+    restart: unless-stopped
+    networks:
+      - trade-mini-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Trade Mini アプリケーション
+  trade-mini:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: trade-mini-app
+    depends_on:
+      questdb:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - QUESTDB_HOST=questdb
+      - QUESTDB_PORT=9000
+      - QUESTDB_ILP_PORT=9009
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./config.yml:/app/config.yml:ro
+      - ./logs:/app/logs
+      - trade_mini_data:/app/data
+    restart: unless-stopped
+    networks:
+      - trade-mini-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  # QuestDB Web Console (オプション)
+  questdb-console:
+    image: questdb/questdb:7.3.10
+    container_name: trade-mini-console
+    command: ["java", "-cp", "/opt/questdb/questdb.jar", "io.questdb.ServerMain", "-d", "/tmp", "-n"]
+    ports:
+      - "9001:9000"
+    depends_on:
+      - questdb
+    networks:
+      - trade-mini-network
+    profiles:
+      - console
+
+# ネットワーク
+networks:
+  trade-mini-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ボリューム
+volumes:
+  questdb_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/questdb
+  trade_mini_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/trade-mini
+
+# Compose拡張（開発環境用）
+x-development:
+  &development-config
+  profiles:
+    - dev
+  environment:
+    - LOG_LEVEL=DEBUG
+  volumes:
+    - .:/app:ro
+    - ./logs:/app/logs
+
+# 開発環境用のオーバーライド
+services:
+  trade-mini-dev:
+    <<: *development-config
+    extends:
+      service: trade-mini
+    container_name: trade-mini-dev
+    command: ["python", "-u", "main.py"]
