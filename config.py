@@ -113,14 +113,14 @@ class Config:
         """Bybit API URL（環境に応じて選択）"""
         env = self.bybit_environment
         if env == "live":
-            return self.get("bybit.live.api_url", "https://api.bybit.com")
+            return "https://api.bybit.com"
         elif env == "demo":
-            return self.get("bybit.demo.api_url", "https://api.bybit.com")
+            return "https://api-demo.bybit.com"  # デモトレード用URL
         elif env == "testnet":
-            return self.get("bybit.testnet.api_url", "https://api-testnet.bybit.com")
+            return "https://api-testnet.bybit.com"
         else:
             # デフォルトはデモ
-            return self.get("bybit.demo.api_url", "https://api.bybit.com")
+            return "https://api-demo.bybit.com"  # デモトレード用URL
 
     # 戦略パラメータ
     @property

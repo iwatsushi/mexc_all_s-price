@@ -42,7 +42,7 @@ class BybitClient:
     """Bybit REST APIクライアント（先物取引）"""
 
     def __init__(
-        self, api_key: str, api_secret: str, testnet: bool = False, base_url: str = None
+        self, api_key: str, api_secret: str, environment: str = "live", base_url: str = None
     ):
         """
         初期化
@@ -50,20 +50,24 @@ class BybitClient:
         Args:
             api_key: Bybit API Key
             api_secret: Bybit API Secret
-            testnet: テストネット使用フラグ
+            environment: 環境選択 ("live", "demo", "testnet")
             base_url: カスタムAPIベースURL（指定時は優先使用）
         """
         self.api_key = api_key
         self.api_secret = api_secret
-        self.testnet = testnet
+        self.environment = environment
 
-        # API URL設定（base_url指定時は優先、そうでなければ従来通り）
+        # API URL設定
         if base_url:
             self.base_url = base_url
-        elif testnet:
+        elif environment == "testnet":
             self.base_url = "https://api-testnet.bybit.com"
+        elif environment == "demo":
+            self.base_url = "https://api-demo.bybit.com"  # デモトレード用URL
         else:
-            self.base_url = "https://api.bybit.com"
+            self.base_url = "https://api.bybit.com"  # 本番用URL
+        
+        logger.info(f"Bybit API URL: {self.base_url} (environment: {environment})")
 
         self.session = requests.Session()
 

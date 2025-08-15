@@ -131,7 +131,7 @@ class TradeMini:
             self.bybit_client = BybitClient(
                 self.config.bybit_api_key,
                 self.config.bybit_api_secret,
-                self.config.bybit_testnet,
+                self.config.bybit_environment,
                 self.config.bybit_api_url
             )
             logger.info("Bybit client created")
