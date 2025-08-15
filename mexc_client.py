@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 import requests
+import websockets
 
 from config import Config
 
@@ -52,141 +53,157 @@ class OrderResult:
     message: str = ""
 
 
-class MEXCPricePollingClient:
-    """MEXC 毎秒価格取得クライアント（REST API）"""
+class MEXCWebSocketClient:
+    """MEXC Futures WebSocket全銘柄価格購読クライアント"""
 
     def __init__(self, config: Config):
         self.config = config
-        # MEXC Futures REST API URL
-        self.api_url = "https://contract.mexc.com/api/v1/contract/ticker"
+        # MEXC Futures WebSocket URL
+        self.ws_url = "wss://contract.mexc.com/edge"
         self.running = False
         self.shutdown_event = threading.Event()
 
         # データコールバック
         self.tick_callback: Optional[Callable[[TickData], None]] = None
 
-        # ポーリング設定
-        self.polling_interval = 1.0  # 1秒間隔
-        self._polling_task = None
-
-        # HTTPセッション
-        import requests
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'trade-mini/1.0'
-        })
+        # WebSocket関連
+        self._ws_task = None
+        self._websocket = None
+        self._reconnect_attempts = 0
+        self._max_reconnect_attempts = 5
 
     async def connect(self) -> bool:
-        """価格ポーリング開始"""
+        """WebSocket接続開始"""
         try:
-            logger.info(f"Starting MEXC price polling: {self.api_url}")
-
-            # API接続テスト
-            response = self.session.get(self.api_url, timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("success") and data.get("data"):
-                    logger.info(f"MEXC API test successful, {len(data['data'])} contracts available")
-                    
-                    self.running = True
-                    # 価格ポーリングタスクを開始
-                    self._polling_task = asyncio.create_task(self._price_polling_loop())
-                    logger.info("Price polling task started")
-                    return True
-                else:
-                    logger.error(f"MEXC API test failed: {data}")
-                    return False
-            else:
-                logger.error(f"MEXC API connection failed: HTTP {response.status_code}")
-                return False
+            logger.info(f"Starting MEXC WebSocket connection: {self.ws_url}")
+            
+            self.running = True
+            # WebSocketタスクを開始
+            self._ws_task = asyncio.create_task(self._websocket_loop())
+            logger.info("WebSocket task started")
+            return True
 
         except Exception as e:
-            logger.error(f"Failed to connect to MEXC API: {e}")
+            logger.error(f"Failed to start MEXC WebSocket: {e}")
             return False
 
     async def disconnect(self):
-        """価格ポーリング停止"""
-        logger.info("Stopping MEXC price polling...")
+        """WebSocket接続停止"""
+        logger.info("Stopping MEXC WebSocket...")
 
         self.running = False
         self.shutdown_event.set()
 
-        if self._polling_task and not self._polling_task.done():
-            self._polling_task.cancel()
+        if self._websocket:
+            await self._websocket.close()
+
+        if self._ws_task and not self._ws_task.done():
+            self._ws_task.cancel()
             try:
-                await self._polling_task
+                await self._ws_task
             except asyncio.CancelledError:
                 pass
 
-        self.session.close()
-        logger.info("MEXC price polling stopped")
+        logger.info("MEXC WebSocket stopped")
 
     async def subscribe_all_tickers(self) -> bool:
-        """価格ポーリング開始（互換性のため）"""
+        """全銘柄ティッカー購読開始（互換性のため）"""
         if self.running:
-            logger.info("MEXC price polling already running")
+            logger.info("MEXC WebSocket already running")
             return True
         else:
-            logger.warning("MEXC price polling not started")
+            logger.warning("MEXC WebSocket not started")
             return False
 
     def set_tick_callback(self, callback: Callable[[TickData], None]):
         """価格データコールバックを設定"""
         self.tick_callback = callback
 
-    async def _price_polling_loop(self):
-        """毎秒価格取得ループ"""
-        logger.info("🔄 MEXC price polling loop started")
+    async def _websocket_loop(self):
+        """WebSocketメインループ（再接続対応）"""
+        logger.info("🔄 MEXC WebSocket loop started")
         
         while self.running and not self.shutdown_event.is_set():
             try:
-                # 価格データを取得
-                response = self.session.get(self.api_url, timeout=5)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    
-                    if data.get("success") and data.get("data"):
-                        contracts = data["data"]
-                        logger.info(f"📊 MEXC received {len(contracts)} contract prices")
-                        
-                        # 各コントラクトを処理
-                        if self.tick_callback:
-                            for contract in contracts:
-                                symbol = contract.get("symbol", "")
-                                price = float(contract.get("lastPrice", 0))
-                                volume = float(contract.get("volume24", 0))
-                                
-                                if symbol and price > 0:
-                                    # 銘柄名を正規化（_を削除してUSDT形式に）
-                                    normalized_symbol = symbol.replace("_", "")
-                                    
-                                    tick = TickData(
-                                        symbol=normalized_symbol,
-                                        price=price,
-                                        timestamp=datetime.now(),
-                                        volume=volume
-                                    )
-                                    
-                                    try:
-                                        self.tick_callback(tick)
-                                    except Exception as e:
-                                        logger.error(f"Error in price callback: {e}")
-                    else:
-                        logger.warning(f"MEXC API response error: {data}")
-                else:
-                    logger.warning(f"MEXC API HTTP error: {response.status_code}")
-
+                await self._websocket_connection()
             except Exception as e:
-                logger.error(f"Error in price polling loop: {e}")
-
-            # 次の実行まで待機
-            try:
-                await asyncio.sleep(self.polling_interval)
-            except asyncio.CancelledError:
-                break
-
-        logger.info("MEXC price polling loop ended")
+                logger.error(f"WebSocket connection error: {e}")
+                
+                if self.running and self._reconnect_attempts < self._max_reconnect_attempts:
+                    self._reconnect_attempts += 1
+                    wait_time = min(2 ** self._reconnect_attempts, 30)  # 指数バックオフ、最大30秒
+                    logger.info(f"Reconnecting in {wait_time} seconds (attempt {self._reconnect_attempts})")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error("Max reconnection attempts reached")
+                    break
+        
+        logger.info("MEXC WebSocket loop ended")
+    
+    async def _websocket_connection(self):
+        """WebSocket接続処理"""
+        
+        async with websockets.connect(self.ws_url) as websocket:
+            self._websocket = websocket
+            self._reconnect_attempts = 0  # 成功したらリセット
+            
+            logger.info("WebSocket connected, subscribing to tickers...")
+            
+            # sub.tickers チャネルを購読
+            subscribe_msg = {
+                "method": "sub.tickers",
+                "param": {}
+            }
+            await websocket.send(json.dumps(subscribe_msg))
+            logger.info("Subscribed to sub.tickers channel")
+            
+            # メッセージ受信ループ
+            async for message in websocket:
+                try:
+                    data = json.loads(message)
+                    
+                    # 購読確認メッセージ
+                    if data.get("channel") == "rs.sub.tickers":
+                        logger.info(f"Subscription confirmed: {data.get('data')}")
+                        continue
+                    
+                    # ティッカーデータ処理
+                    if data.get("channel") == "push.tickers" and "data" in data:
+                        tickers = data["data"]
+                        if isinstance(tickers, list):
+                            logger.info(f"📊 MEXC WebSocket received {len(tickers)} tickers")
+                            
+                            # 各ティッカーを処理
+                            if self.tick_callback:
+                                for ticker in tickers:
+                                    if isinstance(ticker, dict):
+                                        symbol = ticker.get("symbol", "")
+                                        price = float(ticker.get("lastPrice", 0))
+                                        volume = float(ticker.get("volume24", 0))
+                                        
+                                        if symbol and price > 0:
+                                            # 銘柄名を正規化（_を削除してUSDT形式に）
+                                            normalized_symbol = symbol.replace("_", "")
+                                            
+                                            tick = TickData(
+                                                symbol=normalized_symbol,
+                                                price=price,
+                                                timestamp=datetime.now(),
+                                                volume=volume
+                                            )
+                                            
+                                            try:
+                                                self.tick_callback(tick)
+                                            except Exception as e:
+                                                logger.error(f"Error in tick callback: {e}")
+                
+                except json.JSONDecodeError:
+                    logger.warning(f"Non-JSON message received: {message[:100]}...")
+                except Exception as e:
+                    logger.error(f"Error processing WebSocket message: {e}")
+                    
+                if self.shutdown_event.is_set():
+                    break
 
 
 
@@ -369,28 +386,28 @@ class MEXCRESTClient:
 
 
 class MEXCClient:
-    """MEXC統合クライアント（価格ポーリング + REST API）"""
+    """MEXC統合クライアント（WebSocket価格購読 + REST API）"""
 
     def __init__(self, config: Config):
         self.config = config
-        self.price_client = MEXCPricePollingClient(config)
+        self.websocket_client = MEXCWebSocketClient(config)
         self.rest_client = MEXCRESTClient(config)
 
     async def start(self) -> bool:
         """クライアント開始"""
-        return await self.price_client.connect()
+        return await self.websocket_client.connect()
 
     async def stop(self):
         """クライアント停止"""
-        await self.price_client.disconnect()
+        await self.websocket_client.disconnect()
 
     def set_tick_callback(self, callback: Callable[[TickData], None]):
         """価格データコールバック設定"""
-        self.price_client.set_tick_callback(callback)
+        self.websocket_client.set_tick_callback(callback)
 
     async def subscribe_all_tickers(self) -> bool:
-        """全銘柄価格取得開始"""
-        return await self.price_client.subscribe_all_tickers()
+        """全銘柄価格購読開始"""
+        return await self.websocket_client.subscribe_all_tickers()
 
     # REST API メソッドをラップ
     def get_balance(self) -> Dict[str, Any]:
