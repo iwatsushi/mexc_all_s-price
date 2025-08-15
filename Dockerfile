@@ -18,6 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # アプリケーションファイルをコピー
 COPY config.py .
 COPY mexc_client.py .
+COPY bybit_client.py .
+COPY symbol_mapper.py .
 COPY data_manager.py .
 COPY strategy.py .
 COPY position_manager.py .

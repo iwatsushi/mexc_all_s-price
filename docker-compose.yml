@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # QuestDB データベース
   questdb:
@@ -20,10 +18,11 @@ services:
     networks:
       - trade-mini-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/"]
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/ || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
+      start_period: 60s
 
   # Trade Mini アプリケーション
   trade-mini:
@@ -32,8 +31,7 @@ services:
       dockerfile: Dockerfile
     container_name: trade-mini-app
     depends_on:
-      questdb:
-        condition: service_healthy
+      - questdb
     env_file:
       - .env
     environment:
@@ -73,6 +71,33 @@ services:
     profiles:
       - console
 
+  # 開発環境用サービス
+  trade-mini-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: trade-mini-dev
+    profiles:
+      - dev
+    depends_on:
+      questdb:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - QUESTDB_HOST=questdb
+      - QUESTDB_PORT=9000
+      - QUESTDB_ILP_PORT=9009
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ./config.yml:/app/config.yml:ro
+      - ./logs:/app/logs
+      - .:/app:ro
+    restart: unless-stopped
+    networks:
+      - trade-mini-network
+    command: ["python", "-u", "main.py"]
+
 # ネットワーク
 networks:
   trade-mini-network:
@@ -95,23 +120,3 @@ volumes:
       type: none
       o: bind
       device: ./data/trade-mini
-
-# Compose拡張（開発環境用）
-x-development:
-  &development-config
-  profiles:
-    - dev
-  environment:
-    - LOG_LEVEL=DEBUG
-  volumes:
-    - .:/app:ro
-    - ./logs:/app/logs
-
-# 開発環境用のオーバーライド
-services:
-  trade-mini-dev:
-    <<: *development-config
-    extends:
-      service: trade-mini
-    container_name: trade-mini-dev
-    command: ["python", "-u", "main.py"]

@@ -59,6 +59,69 @@ class Config:
         """MEXC API Secret"""
         return os.getenv("MEXC_API_SECRET", "")
 
+    @property
+    def bybit_environment(self) -> str:
+        """Bybit環境選択（live/demo/testnet）"""
+        # 環境変数を最優先、次にconfig.yml設定
+        env_setting = os.getenv("BYBIT_ENVIRONMENT")
+        if env_setting:
+            return env_setting.lower()
+        
+        # 後方互換性のため旧設定も確認
+        env_testnet = os.getenv("BYBIT_TESTNET")
+        if env_testnet is not None:
+            return "testnet" if env_testnet.lower() == "true" else "demo"
+        
+        # config.ymlの設定を確認
+        return self.get("bybit.environment", "demo")
+
+    @property
+    def bybit_api_key(self) -> str:
+        """Bybit API Key（環境に応じて選択）"""
+        env = self.bybit_environment
+        if env == "live":
+            return os.getenv("BYBIT_API_KEY_LIVE", "")
+        elif env == "demo":
+            return os.getenv("BYBIT_API_KEY_DEMO", "")
+        elif env == "testnet":
+            return os.getenv("BYBIT_API_KEY_TESTNET", "")
+        else:
+            # デフォルトはデモ
+            return os.getenv("BYBIT_API_KEY_DEMO", "")
+
+    @property
+    def bybit_api_secret(self) -> str:
+        """Bybit API Secret（環境に応じて選択）"""
+        env = self.bybit_environment
+        if env == "live":
+            return os.getenv("BYBIT_API_SECRET_LIVE", "")
+        elif env == "demo":
+            return os.getenv("BYBIT_API_SECRET_DEMO", "")
+        elif env == "testnet":
+            return os.getenv("BYBIT_API_SECRET_TESTNET", "")
+        else:
+            # デフォルトはデモ
+            return os.getenv("BYBIT_API_SECRET_DEMO", "")
+        
+    @property
+    def bybit_testnet(self) -> bool:
+        """Bybit Testnet使用フラグ（後方互換性のため残存）"""
+        return self.bybit_environment == "testnet"
+
+    @property
+    def bybit_api_url(self) -> str:
+        """Bybit API URL（環境に応じて選択）"""
+        env = self.bybit_environment
+        if env == "live":
+            return self.get("bybit.live.api_url", "https://api.bybit.com")
+        elif env == "demo":
+            return self.get("bybit.demo.api_url", "https://api.bybit.com")
+        elif env == "testnet":
+            return self.get("bybit.testnet.api_url", "https://api-testnet.bybit.com")
+        else:
+            # デフォルトはデモ
+            return self.get("bybit.demo.api_url", "https://api.bybit.com")
+
     # 戦略パラメータ
     @property
     def price_comparison_seconds(self) -> int:
@@ -119,14 +182,27 @@ class Config:
 
     # MEXC API設定
     @property
+    def mexc_environment(self) -> str:
+        """MEXC 環境（production or testnet）"""
+        return self.get("mexc.environment", "production")
+
+    @property
     def mexc_ws_url(self) -> str:
         """MEXC WebSocket URL"""
-        return self.get("mexc.ws_url", "wss://contract.mexc.com/ws")
+        env = self.mexc_environment
+        if env == "testnet":
+            return self.get("mexc.testnet.ws_url", "wss://contract.testnet.mexc.com/ws")
+        else:
+            return self.get("mexc.production.ws_url", "wss://contract.mexc.com/ws")
 
     @property
     def mexc_api_url(self) -> str:
         """MEXC REST API URL"""
-        return self.get("mexc.api_url", "https://contract.mexc.com")
+        env = self.mexc_environment
+        if env == "testnet":
+            return self.get("mexc.testnet.api_url", "https://contract.testnet.mexc.com")
+        else:
+            return self.get("mexc.production.api_url", "https://contract.mexc.com")
 
     @property
     def mexc_reconnect_interval(self) -> int:

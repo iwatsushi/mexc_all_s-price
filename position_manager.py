@@ -11,6 +11,8 @@ from typing import Dict, List, Optional, Tuple
 
 from config import Config
 from mexc_client import MEXCClient, OrderResult
+from bybit_client import BybitClient, BybitOrderResult
+from symbol_mapper import SymbolMapper
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +66,14 @@ class Position:
 class PositionManager:
     """ポジション管理クラス"""
 
-    def __init__(self, config: Config, mexc_client: MEXCClient):
+    def __init__(self, config: Config, mexc_client: MEXCClient, bybit_client: BybitClient, symbol_mapper: SymbolMapper):
         self.config = config
         self.mexc_client = mexc_client
+        self.bybit_client = bybit_client
+        self.symbol_mapper = symbol_mapper
+        
+        # 取引所設定（将来のMEXC対応のため）
+        self.trading_exchange = config.get("trading.exchange", "bybit")  # "mexc" or "bybit"
 
         # 設定パラメータ
         self.max_concurrent_positions = config.max_concurrent_positions
@@ -106,21 +113,43 @@ class PositionManager:
     def _update_account_info(self):
         """アカウント情報を更新"""
         try:
-            balance_response = self.mexc_client.get_balance()
+            if self.trading_exchange == "bybit":
+                balance_response = self.bybit_client.get_wallet_balance()
+                
+                if balance_response.get("retCode") == 0:
+                    result = balance_response.get("result", {})
+                    accounts = result.get("list", [])
+                    
+                    for account in accounts:
+                        coins = account.get("coin", [])
+                        for coin in coins:
+                            if coin.get("coin") == "USDT":
+                                self.account_balance = float(coin.get("walletBalance", 0))
+                                self.available_balance = float(coin.get("availableToWithdraw", 0))
+                                break
+                        if self.account_balance > 0:
+                            break
+                    
+                    logger.info(f"Bybit account balance updated: {self.account_balance} USDT")
+                else:
+                    logger.error(f"Failed to get Bybit balance: {balance_response.get('retMsg')}")
+            
+            else:  # MEXC
+                balance_response = self.mexc_client.get_balance()
 
-            if balance_response.get("success"):
-                assets = balance_response.get("data", [])
-                for asset in assets:
-                    if asset.get("currency") == "USDT":
-                        self.account_balance = float(asset.get("availableBalance", 0))
-                        self.available_balance = float(asset.get("availableBalance", 0))
-                        break
+                if balance_response.get("success"):
+                    assets = balance_response.get("data", [])
+                    for asset in assets:
+                        if asset.get("currency") == "USDT":
+                            self.account_balance = float(asset.get("availableBalance", 0))
+                            self.available_balance = float(asset.get("availableBalance", 0))
+                            break
 
-                logger.info(f"Account balance updated: {self.account_balance} USDT")
-            else:
-                logger.error(
-                    f"Failed to get balance: {balance_response.get('message')}"
-                )
+                    logger.info(f"MEXC account balance updated: {self.account_balance} USDT")
+                else:
+                    logger.error(
+                        f"Failed to get MEXC balance: {balance_response.get('message')}"
+                    )
 
         except Exception as e:
             logger.error(f"Error updating account info: {e}")
@@ -206,6 +235,11 @@ class PositionManager:
             if symbol in self.positions:
                 return False, f"Position already exists for {symbol}"
 
+            # Bybitで取引可能な銘柄かチェック（Bybit取引の場合）
+            if self.trading_exchange == "bybit":
+                if not self.symbol_mapper.is_tradeable_on_bybit(symbol):
+                    return False, f"Symbol {symbol} is not tradeable on Bybit"
+
             # 最大ポジション数チェック
             if len(self.positions) >= self.max_concurrent_positions:
                 return (
@@ -257,20 +291,35 @@ class PositionManager:
             if position_size <= 0:
                 return False, "Invalid position size calculated", None
 
-            # マージンモード設定
+            # マージンモード設定とレバレッジ設定
             margin_mode = self._determine_margin_mode()
-            margin_success = self.mexc_client.set_margin_mode(symbol, margin_mode.value)
+            
+            if self.trading_exchange == "bybit":
+                # Bybitでレバレッジ設定
+                leverage_success = self.bybit_client.set_leverage(symbol, leverage)
+                if leverage_success:
+                    self.stats["margin_mode_switches"] += 1
+                    logger.info(f"Set leverage for {symbol} to {leverage}x on Bybit")
+                
+                # 注文実行（Bybit）
+                order_result = self.bybit_client.place_market_order(symbol, side, position_size)
+                order_success = order_result.success
+                order_id = order_result.order_id
+                order_message = order_result.message
+            else:
+                # MEXC
+                margin_success = self.mexc_client.set_margin_mode(symbol, margin_mode.value)
+                if margin_success:
+                    self.stats["margin_mode_switches"] += 1
+                    logger.info(f"Set margin mode for {symbol} to {margin_mode.value}")
+                
+                # 注文実行（MEXC）
+                mexc_order_result = self.mexc_client.place_market_order(symbol, side, position_size)
+                order_success = mexc_order_result.success
+                order_id = mexc_order_result.order_id
+                order_message = mexc_order_result.message
 
-            if margin_success:
-                self.stats["margin_mode_switches"] += 1
-                logger.info(f"Set margin mode for {symbol} to {margin_mode.value}")
-
-            # 注文実行
-            order_result = self.mexc_client.place_market_order(
-                symbol, side, position_size
-            )
-
-            if order_result.success:
+            if order_success:
                 # ポジション作成
                 position = Position(
                     symbol=symbol,
@@ -279,7 +328,7 @@ class PositionManager:
                     entry_price=entry_price,
                     entry_time=timestamp,
                     status=PositionStatus.OPEN,
-                    entry_order_id=order_result.order_id,
+                    entry_order_id=order_id,
                     max_leverage=leverage,
                     margin_mode=margin_mode,
                     margin_used=margin_required,
@@ -292,16 +341,16 @@ class PositionManager:
                 self.stats["successful_orders"] += 1
 
                 logger.info(
-                    f"Position opened: {symbol} {side} size={position_size:.6f}"
+                    f"Position opened on {self.trading_exchange.upper()}: {symbol} {side} size={position_size:.6f}"
                 )
                 return True, f"Position opened successfully", position
 
             else:
                 self.stats["failed_orders"] += 1
                 logger.error(
-                    f"Failed to open position for {symbol}: {order_result.message}"
+                    f"Failed to open position for {symbol}: {order_message}"
                 )
-                return False, f"Order failed: {order_result.message}", None
+                return False, f"Order failed: {order_message}", None
 
     def close_position(
         self, symbol: str, reason: str = ""
@@ -326,11 +375,21 @@ class PositionManager:
 
             # 決済注文実行
             position.status = PositionStatus.CLOSING
-            order_result = self.mexc_client.close_position(symbol, position.side)
+            
+            if self.trading_exchange == "bybit":
+                order_result = self.bybit_client.close_position(symbol, position.side)
+                order_success = order_result.success
+                order_id = order_result.order_id
+                order_message = order_result.message
+            else:
+                mexc_order_result = self.mexc_client.close_position(symbol, position.side)
+                order_success = mexc_order_result.success
+                order_id = mexc_order_result.order_id
+                order_message = mexc_order_result.message
 
-            if order_result.success:
+            if order_success:
                 position.status = PositionStatus.CLOSED
-                position.close_order_id = order_result.order_id
+                position.close_order_id = order_id
                 position.last_update = datetime.now()
 
                 # 統計更新
@@ -343,7 +402,7 @@ class PositionManager:
                 closed_position = self.positions.pop(symbol)
 
                 logger.info(
-                    f"Position closed: {symbol} {position.side} reason='{reason}'"
+                    f"Position closed on {self.trading_exchange.upper()}: {symbol} {position.side} reason='{reason}'"
                 )
                 return True, "Position closed successfully", closed_position
 
@@ -351,9 +410,9 @@ class PositionManager:
                 position.status = PositionStatus.ERROR
                 self.stats["failed_orders"] += 1
                 logger.error(
-                    f"Failed to close position for {symbol}: {order_result.message}"
+                    f"Failed to close position for {symbol}: {order_message}"
                 )
-                return False, f"Close order failed: {order_result.message}", position
+                return False, f"Close order failed: {order_message}", position
 
     def update_position_pnl(self, symbol: str, current_price: float):
         """ポジションのPnLを更新"""

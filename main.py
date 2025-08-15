@@ -14,10 +14,15 @@ from typing import Any, Dict
 # ログ設定
 from loguru import logger as loguru_logger
 
+# グローバルロガー
+logger = loguru_logger
+
 # 自作モジュール
 from config import Config
 from data_manager import DataManager
 from mexc_client import MEXCClient, TickData
+from bybit_client import BybitClient
+from symbol_mapper import SymbolMapper
 from position_manager import PositionManager
 from questdb_client import QuestDBClient, QuestDBTradeRecordManager
 from strategy import SignalType, TradingStrategy
@@ -41,6 +46,8 @@ class TradeMini:
 
         # コンポーネント
         self.mexc_client = None
+        self.bybit_client = None
+        self.symbol_mapper = None
         self.data_manager = None
         self.strategy = None
         self.position_manager = None
@@ -85,7 +92,7 @@ class TradeMini:
             self.config.log_file,
             level=self.config.log_level,
             rotation=f"{self.config.get('logging.max_size_mb', 10)} MB",
-            retention=f"{self.config.get('logging.backup_count', 5)} files",
+            retention=self.config.get('logging.backup_count', 5),
             encoding="utf-8",
         )
 
@@ -116,9 +123,22 @@ class TradeMini:
         logger.info("Initializing components...")
 
         try:
-            # MEXC クライアント
+            # MEXC クライアント（ティックデータ取得用）
             self.mexc_client = MEXCClient(self.config)
             logger.info("MEXC client created")
+
+            # Bybit クライアント（注文・決済用）
+            self.bybit_client = BybitClient(
+                self.config.bybit_api_key,
+                self.config.bybit_api_secret,
+                self.config.bybit_testnet,
+                self.config.bybit_api_url
+            )
+            logger.info("Bybit client created")
+
+            # 銘柄マッピング管理
+            self.symbol_mapper = SymbolMapper(self.bybit_client)
+            logger.info("Symbol mapper created")
 
             # データ管理
             self.data_manager = DataManager(self.config)
@@ -129,7 +149,9 @@ class TradeMini:
             logger.info("Trading strategy created")
 
             # ポジション管理
-            self.position_manager = PositionManager(self.config, self.mexc_client)
+            self.position_manager = PositionManager(
+                self.config, self.mexc_client, self.bybit_client, self.symbol_mapper
+            )
             logger.info("Position manager created")
 
             # QuestDB クライアント
@@ -170,10 +192,20 @@ class TradeMini:
             # QuestDB に保存
             self.questdb_client.save_tick_data(tick)
 
-            # 戦略分析
-            signal = self.strategy.analyze_tick(tick)
+            # 戦略分析（Bybitで取引可能な銘柄のみ）
+            trading_exchange = self.config.get("trading.exchange", "bybit")
+            
+            if trading_exchange == "bybit":
+                # Bybitで取引可能な銘柄のみ戦略分析
+                if self.symbol_mapper.is_tradeable_on_bybit(tick.symbol):
+                    signal = self.strategy.analyze_tick(tick)
+                else:
+                    signal = None
+            else:
+                # MEXC取引の場合は全銘柄で戦略分析
+                signal = self.strategy.analyze_tick(tick)
 
-            if signal.signal_type != SignalType.NONE:
+            if signal and signal.signal_type != SignalType.NONE:
                 self.stats["signals_generated"] += 1
                 logger.info(
                     f"Signal generated: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f} - {signal.reason}"
@@ -291,6 +323,9 @@ class TradeMini:
             questdb_stats = (
                 self.questdb_client.get_stats() if self.questdb_client else {}
             )
+            symbol_stats = (
+                self.symbol_mapper.get_mapping_stats() if self.symbol_mapper else {}
+            )
 
             # ポートフォリオ要約
             portfolio = (
@@ -315,6 +350,7 @@ class TradeMini:
             )
 
             logger.info(f"QuestDB ticks saved: {questdb_stats.get('ticks_saved', 0)}")
+            logger.info(f"Tradeable symbols on Bybit: {symbol_stats.get('total_tradeable_symbols', 0)}")
             logger.info("=============================")
 
         except Exception as e:
@@ -444,9 +480,9 @@ async def main():
         await app.run()
 
     except KeyboardInterrupt:
-        logger.info("Interrupted by user")
+        print("Interrupted by user")
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
+        print(f"Fatal error: {e}")
         sys.exit(1)
 
 
@@ -455,7 +491,7 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Application interrupted")
+        print("Application interrupted")
     except Exception as e:
-        logger.error(f"Application failed: {e}")
+        print(f"Application failed: {e}")
         sys.exit(1)

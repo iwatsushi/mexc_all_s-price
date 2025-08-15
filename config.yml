@@ -1,29 +1,59 @@
 # Trade Mini 設定ファイル
 
+# 取引設定
+trading:
+    # 使用する取引所（将来のMEXC対応のため）
+    # "bybit" - Bybitで取引（推奨）
+    # "mexc" - MEXCで取引（将来実装予定）
+    exchange: "bybit"
+
+# Bybit API設定
+bybit:
+    # 使用環境の選択
+    # "live" - 本番取引（実資金）
+    # "demo" - 本番デモトレード（推奨）
+    # "testnet" - 開発者向けテストネット
+    environment: "demo"
+
+    # 本番取引環境（実資金）
+    live:
+        api_url: "https://api.bybit.com"
+        description: "Live trading with real funds"
+
+    # 本番デモトレード環境（仮想資金）
+    demo:
+        api_url: "https://api.bybit.com"
+        description: "Demo trading on production servers"
+
+    # テストネット環境（開発・レート制限検証用）
+    testnet:
+        api_url: "https://api-testnet.bybit.com"
+        description: "Developer testnet environment"
+
 # 取引戦略パラメータ
 strategy:
     # N秒前の価格と比較（N=1の場合は1秒前と直接比較）
     price_comparison_seconds: 1
 
-    # 上昇トリガー閾値（X%）
-    long_threshold_percent: 2.0
+    # 上昇トリガー閾値（X%）- 保守的設定
+    long_threshold_percent: 5.0
 
-    # 下落トリガー閾値（Y%）
-    short_threshold_percent: 2.0
+    # 下落トリガー閾値（Y%）- 保守的設定
+    short_threshold_percent: 5.0
 
-    # 利確判定の反発閾値（Z%）- オープン後の最高値/最安値からの逆行率
-    reversal_threshold_percent: 1.5
+    # 利確判定の反発閾値（Z%）- 保守的設定
+    reversal_threshold_percent: 2.0
 
-    # 最小利益率（M%）- この利益を一度も超えていない場合は反発閾値に達しても決済しない
-    min_profit_percent: 3.0
+    # 最小利益率（M%）- 保守的設定
+    min_profit_percent: 1.0
 
 # ポジション管理
 position:
-    # 全資産に対する使用比率（α%）
-    capital_usage_percent: 10.0
+    # 全資産に対する使用比率（α%）- 非常に保守的
+    capital_usage_percent: 1.0
 
-    # 同時保有可能な最大銘柄数
-    max_concurrent_positions: 3
+    # 同時保有可能な最大銘柄数 - 保守的
+    max_concurrent_positions: 1
 
     # クロスマージン切替閾値（USDT）
     cross_margin_threshold: 1000.0
@@ -41,11 +71,24 @@ data:
 
 # MEXC API設定
 mexc:
-    # WebSocket URL
-    ws_url: "wss://contract.mexc.com/ws"
+    # 本番環境
+    production:
+        # WebSocket URL
+        ws_url: "wss://wbs.mexc.com/ws"
+        # REST API URL
+        api_url: "https://api.mexc.com"
 
-    # REST API URL
-    api_url: "https://contract.mexc.com"
+    # テストネット環境（デモトレード）
+    testnet:
+        # WebSocket URL
+        ws_url: "wss://contract.testnet.mexc.com/ws"
+        # REST API URL
+        api_url: "https://contract.testnet.mexc.com"
+
+    # 使用環境の選択 ("production" or "testnet")
+    # 注: MEXCにはAPIレベルのテストネットが存在しないため、productionを使用
+    # デモトレード的な動作のため、最小限のパラメータに設定
+    environment: "production"
 
     # 再接続設定
     reconnect_interval: 5

@@ -4,12 +4,17 @@
 
 ## 概要
 
-Trade Miniは、MEXCの先物取引所を使用して自動売買を行うコンパクトなシステムです。大きな価格変動を検知して瞬時にエントリーし、反発を検知して利確する戦略を実装しています。
+Trade Miniは、**MEXCのWebSocketからティックデータを取得し、Bybitで注文・決済を行う**ハイブリッド型の自動売買システムです。大きな価格変動を検知して瞬時にエントリーし、反発を検知して利確する戦略を実装しています。
 
 ## 主な機能
 
-- **MEXC先物取引所のみ対応**
-- **全USDT銘柄のリアルタイムティック取得**
+- **ハイブリッド取引システム**
+  - MEXCのWebSocket APIから全USDT銘柄のリアルタイムティックデータを取得
+  - Bybitで実際の注文・決済を実行（先物注文APIが完全対応済み）
+  - 将来のMEXC注文API対応に備えた設定可能な仕組み
+- **高度な銘柄マッピング**
+  - MEXCとBybitの銘柄を自動マッピング
+  - Bybitで取引可能な銘柄のみを対象とした戦略実行
 - **N秒価格変動検知による自動エントリー**
 - **反発検知による自動利確**
 - **最大3銘柄同時ポジション管理**
@@ -19,23 +24,89 @@ Trade Miniは、MEXCの先物取引所を使用して自動売買を行うコン
 
 ## 取引戦略
 
-1. 全USDT銘柄の1秒毎ティックデータをリアルタイム監視
-2. N秒前との価格比較でX%上昇→ロング、Y%下落→ショート
-3. 価格2倍逆行でも10%損失に収まるレバレッジで取引
-4. M%利益達成後、建値に損切り設定
-5. オープン後最高値/最安値からZ%反発で利確
+1. **データ取得**: MEXCのWebSocketから全USDT銘柄の1秒毎ティックデータをリアルタイム監視
+2. **銘柄フィルタリング**: Bybitで取引可能な銘柄のみを戦略分析対象とする
+3. **エントリー判定**: N秒前との価格比較でX%上昇→ロング、Y%下落→ショート
+4. **注文実行**: Bybitで成行注文を実行（価格2倍逆行でも10%損失に収まるレバレッジ）
+5. **利益管理**: M%利益達成後、建値に損切り設定
+6. **決済実行**: オープン後最高値/最安値からZ%反発でBybitで決済
 
 ## セットアップ
 
-### 1. 必要な認証情報を設定
+### 🚨 デモトレード（推奨）
+
+**実際の資金を使う前に、必ずデモトレードで動作確認してください。**
+
+#### 1. デモトレード用の認証情報を設定
 
 ```bash
 # .env.example を .env にコピー
 cp .env.example .env
 
-# .env ファイルを編集してMEXC API認証情報を入力
-MEXC_API_KEY=your_api_key_here
-MEXC_API_SECRET=your_api_secret_here
+# .env ファイルを編集してAPI認証情報を入力
+# MEXC API（ティックデータ取得用）
+MEXC_API_KEY=your_mexc_api_key_here
+MEXC_API_SECRET=your_mexc_api_secret_here
+
+# Bybit API（注文・決済用）- テストネット推奨
+BYBIT_API_KEY=your_bybit_testnet_api_key_here
+BYBIT_API_SECRET=your_bybit_testnet_api_secret_here
+BYBIT_TESTNET=true  # テストネット使用
+```
+
+#### 2. テストネット環境を有効化
+
+`config.yml`で以下を確認・設定：
+```yaml
+trading:
+  # 使用する取引所（Bybitを使用）
+  exchange: "bybit"
+
+# ティックデータはMEXCから取得、注文はBybitで実行
+# デモトレードの場合は.envでBYBIT_TESTNET=trueに設定
+```
+
+#### 3. デモトレード実行
+
+```bash
+# データディレクトリ作成
+mkdir -p data/questdb data/trade-mini logs
+
+# Docker Compose で起動（デモトレード）
+docker-compose up -d
+
+# ログ確認
+docker-compose logs -f trade-mini
+```
+
+### 💰 本番トレード
+
+#### 1. 本番用の認証情報を設定
+
+```bash
+# .env.example を .env にコピー
+cp .env.example .env
+
+# .env ファイルを編集してAPI認証情報を入力
+# MEXC API（ティックデータ取得用）
+MEXC_API_KEY=your_mexc_api_key_here
+MEXC_API_SECRET=your_mexc_api_secret_here
+
+# Bybit API（注文・決済用）- 本番環境
+BYBIT_API_KEY=your_bybit_api_key_here
+BYBIT_API_SECRET=your_bybit_api_secret_here
+BYBIT_TESTNET=false  # 本番環境使用
+```
+
+#### 2. 本番環境を設定
+
+`config.yml`で本番環境に変更：
+```yaml
+trading:
+  # 使用する取引所（Bybitを使用）
+  exchange: "bybit"
+
+# 本番取引の場合は.envでBYBIT_TESTNET=falseに設定
 ```
 
 ### 2. 設定パラメータの調整
@@ -116,7 +187,9 @@ docker-compose down -v
 trade-mini/
 ├── main.py              # メインアプリケーション
 ├── config.py           # 設定管理
-├── mexc_client.py      # MEXC APIクライアント
+├── mexc_client.py      # MEXC APIクライアント（ティックデータ取得）
+├── bybit_client.py     # Bybit APIクライアント（注文・決済）
+├── symbol_mapper.py    # 銘柄マッピング管理
 ├── data_manager.py     # ティックデータ管理
 ├── strategy.py         # 取引戦略
 ├── position_manager.py # ポジション管理
@@ -134,11 +207,14 @@ trade-mini/
 
 ⚠️ **重要な注意事項**
 
-1. **テスト環境での検証を必須とする**
+1. **テスト環境での検証を必須とする**（Bybitテストネット推奨）
 2. **少額から始める**
 3. **API権限は先物取引のみに限定**
-4. **定期的な資金状況確認**
-5. **想定以上の損失時は手動停止**
+4. **両取引所のAPI設定が必要**
+   - MEXC: ティックデータ取得のため（読み取り権限のみでOK）
+   - Bybit: 注文・決済のため（取引権限が必要）
+5. **定期的な資金状況確認**
+6. **想定以上の損失時は手動停止**
 
 ## パラメータ調整の指針
 
