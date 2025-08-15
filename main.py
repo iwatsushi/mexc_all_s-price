@@ -181,18 +181,12 @@ class TradeMini:
             raise
 
     def _on_tick_received(self, tick: TickData):
-        """ティックデータ受信時のコールバック"""
+        """ティックデータ受信時のコールバック（超高速処理優先）"""
         try:
             # 統計更新
             self.stats["ticks_processed"] += 1
 
-            # データ管理に追加
-            self.data_manager.add_tick(tick)
-
-            # QuestDB に保存
-            self.questdb_client.save_tick_data(tick)
-
-            # 戦略分析（Bybitで取引可能な銘柄のみ）
+            # ⚡ 最優先：即座にトレーディング分析
             trading_exchange = self.config.get("trading.exchange", "bybit")
             
             if trading_exchange == "bybit":
@@ -205,21 +199,40 @@ class TradeMini:
                 # MEXC取引の場合は全銘柄で戦略分析
                 signal = self.strategy.analyze_tick(tick)
 
+            # ⚡ シグナル処理（最優先）
             if signal and signal.signal_type != SignalType.NONE:
                 self.stats["signals_generated"] += 1
                 logger.info(
-                    f"Signal generated: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f} - {signal.reason}"
+                    f"🚨 SIGNAL: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f} - {signal.reason}"
                 )
 
-                # シグナル処理
+                # シグナル処理を最優先で実行
                 asyncio.create_task(self._process_signal(signal))
 
-            # ポジション PnL 更新
+            # ⚡ ポジション PnL 更新（既存ポジションがある場合のみ）
             if tick.symbol in self.position_manager.get_position_symbols():
                 self.position_manager.update_position_pnl(tick.symbol, tick.price)
 
+            # 🔄 データ管理・保存（最低優先度）- 非同期で実行してメインスレッドをブロックしない
+            # トレーディング判断に影響しないよう、バックグラウンドで処理
+            asyncio.create_task(self._background_data_processing(tick))
+
         except Exception as e:
             logger.error(f"Error processing tick data for {tick.symbol}: {e}")
+
+    async def _background_data_processing(self, tick: TickData):
+        """バックグラウンドでのデータ管理・保存処理（トレーディングをブロックしない）"""
+        try:
+            # データ管理に追加（ロック処理があるため非同期で実行）
+            await asyncio.get_event_loop().run_in_executor(
+                None, self.data_manager.add_tick, tick
+            )
+            
+            # QuestDB保存（非同期キューに追加のみ - ブロックしない）
+            self.questdb_client.save_tick_data(tick)
+            
+        except Exception as e:
+            logger.error(f"Error in background data processing for {tick.symbol}: {e}")
 
     async def _process_signal(self, signal):
         """取引シグナル処理"""
