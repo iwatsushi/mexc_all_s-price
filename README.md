@@ -48,10 +48,21 @@ cp .env.example .env
 MEXC_API_KEY=your_mexc_api_key_here
 MEXC_API_SECRET=your_mexc_api_secret_here
 
-# Bybit API（注文・決済用）- テストネット推奨
-BYBIT_API_KEY=your_bybit_testnet_api_key_here
-BYBIT_API_SECRET=your_bybit_testnet_api_secret_here
-BYBIT_TESTNET=true  # テストネット使用
+# Bybit API（3つの環境対応）
+# 本番取引用APIキー（Live Trading）
+BYBIT_API_KEY_LIVE=your_live_trading_api_key_here
+BYBIT_API_SECRET_LIVE=your_live_trading_secret_here
+
+# 本番デモトレード用APIキー（Demo Trading on Production）
+BYBIT_API_KEY_DEMO=your_demo_trading_api_key_here
+BYBIT_API_SECRET_DEMO=your_demo_trading_secret_here
+
+# Bybitテストネット用APIキー（Developer Testnet）
+BYBIT_API_KEY_TESTNET=your_testnet_api_key_here
+BYBIT_API_SECRET_TESTNET=your_testnet_secret_here
+
+# Bybit環境選択（live: 本番取引, demo: 本番デモ, testnet: テストネット）
+BYBIT_ENVIRONMENT=testnet  # 初期はテストネット推奨
 ```
 
 #### 2. テストネット環境を有効化
@@ -77,6 +88,41 @@ docker-compose up -d
 
 # ログ確認
 docker-compose logs -f trade-mini
+```
+
+## 🔄 環境切り替え方法
+
+### テストネット環境（推奨開始環境）
+```bash
+# .envファイル編集
+BYBIT_ENVIRONMENT=testnet
+
+# システム再起動
+docker-compose down
+docker-compose up -d
+```
+
+### 本番デモトレード環境
+```bash
+# .envファイル編集
+BYBIT_ENVIRONMENT=demo
+
+# システム再起動
+docker-compose down
+docker-compose up -d
+```
+
+### 本番取引環境（要注意）
+```bash
+# .envファイル編集
+BYBIT_ENVIRONMENT=live
+
+# 取引パラメータを保守的に設定（config.yml）
+# capital_usage_percent: 0.1  # 0.1%から開始推奨
+
+# システム再起動
+docker-compose down
+docker-compose up -d
 ```
 
 ### 💰 本番トレード
@@ -136,7 +182,7 @@ mkdir -p data/questdb data/trade-mini logs
 ### 4. Docker Compose で起動
 
 ```bash
-# 本番環境
+# 基本起動
 docker-compose up -d
 
 # 開発環境（デバッグログ有効）
@@ -144,6 +190,51 @@ docker-compose --profile dev up -d
 
 # ログ確認
 docker-compose logs -f trade-mini
+```
+
+## 🚀 詳細起動手順
+
+### 推奨起動フロー
+
+```bash
+# 1. プロジェクトディレクトリに移動
+cd C:\Users\iwatsushi\PG\docker\trade-mini
+
+# 2. 設定確認
+python -c "from config import Config; c=Config(); print(f'Environment: {c.bybit_environment}, URL: {c.bybit_api_url}')"
+
+# 3. システム起動
+docker-compose up -d
+
+# 4. ログ確認（初期化完了まで1-2分）
+docker-compose logs -f trade-mini
+
+# 5. 正常動作確認項目
+# - "MEXC WebSocket connected successfully"
+# - "Found XXX tradeable USDT pairs on Bybit"
+# - "Trade Mini is running. Press Ctrl+C to stop."
+
+# 6. バックグラウンド実行
+# Ctrl+C でログ監視終了（システムは継続動作）
+```
+
+### システム管理コマンド
+
+```bash
+# コンテナ状況確認
+docker-compose ps
+
+# 最新ログ確認
+docker-compose logs --tail=20 trade-mini
+
+# 停止
+docker-compose stop
+
+# 完全削除
+docker-compose down
+
+# 強制再起動
+docker-compose restart
 ```
 
 ## 監視とメンテナンス
@@ -227,28 +318,62 @@ trade-mini/
 ### アグレッシブ設定
 - `capital_usage_percent`: 15%
 - `long_threshold_percent`: 1.5%
-- `short_threshold_percent`: 1.5%  
+- `short_threshold_percent`: 1.5%
 - `reversal_threshold_percent`: 1%
 
 ## トラブルシューティング
 
 ### よくある問題
 
-1. **WebSocket接続エラー**
-   - ネットワーク接続確認
-   - MEXCサーバー状況確認
+1. **API認証エラー（"API key is invalid"）**
+   ```bash
+   # 対処法:
+   # - APIキーの権限確認（Read/Trade/Wallet）
+   # - IP制限設定の確認
+   # - 環境選択の確認（testnet/demo/live）
+   # - APIキーの有効期限確認
+   
+   # 設定確認コマンド
+   python -c "from config import Config; c=Config(); print(f'{c.bybit_environment}: {c.bybit_api_key}')"
+   ```
 
-2. **API認証エラー**
-   - API Key/Secret の確認
-   - API権限の確認
+2. **WebSocket接続エラー**
+   ```bash
+   # MEXCサーバー接続問題の場合
+   # - ネットワーク接続確認
+   # - 自動再接続機能が動作（通常は自動復旧）
+   
+   # ログで再接続確認
+   docker-compose logs trade-mini | grep "reconnect"
+   ```
 
 3. **QuestDB接続エラー**
-   - `docker-compose ps` でコンテナ状態確認
-   - `docker-compose logs questdb` でログ確認
+   ```bash
+   # コンテナ状態確認
+   docker-compose ps
+   
+   # QuestDBログ確認
+   docker-compose logs questdb
+   
+   # 再起動
+   docker-compose restart questdb
+   ```
 
-4. **ポジション開設失敗**
-   - 残高不足
+4. **環境設定エラー**
+   ```bash
+   # .env設定確認
+   cat .env | grep BYBIT_ENVIRONMENT
+   
+   # 環境切り替え
+   # .envファイルでBYBIT_ENVIRONMENT=testnet/demo/live
+   docker-compose down
+   docker-compose up -d
+   ```
+
+5. **ポジション開設失敗**
+   - 残高不足（特にテストネット環境）
    - 銘柄の取引停止
+   - APIキーの取引権限不足
    - レバレッジ制限
 
 ### ログレベル変更
