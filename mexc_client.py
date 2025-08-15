@@ -76,7 +76,7 @@ class MEXCWebSocketClient:
         """WebSocket接続開始"""
         try:
             logger.info(f"Starting MEXC WebSocket connection: {self.ws_url}")
-            
+
             self.running = True
             # WebSocketタスクを開始
             self._ws_task = asyncio.create_task(self._websocket_loop())
@@ -107,9 +107,9 @@ class MEXCWebSocketClient:
         logger.info("MEXC WebSocket stopped")
 
     async def subscribe_all_tickers(self) -> bool:
-        """全銘柄ティッカー購読開始（互換性のため）"""
+        """全銘柄ティッカー購読開始"""
         if self.running:
-            logger.info("MEXC WebSocket already running")
+            logger.info("MEXC WebSocket already running and subscribed")
             return True
         else:
             logger.warning("MEXC WebSocket not started")
@@ -122,90 +122,108 @@ class MEXCWebSocketClient:
     async def _websocket_loop(self):
         """WebSocketメインループ（再接続対応）"""
         logger.info("🔄 MEXC WebSocket loop started")
-        
+
         while self.running and not self.shutdown_event.is_set():
             try:
                 await self._websocket_connection()
             except Exception as e:
                 logger.error(f"WebSocket connection error: {e}")
-                
-                if self.running and self._reconnect_attempts < self._max_reconnect_attempts:
+
+                if (
+                    self.running
+                    and self._reconnect_attempts < self._max_reconnect_attempts
+                ):
                     self._reconnect_attempts += 1
-                    wait_time = min(2 ** self._reconnect_attempts, 30)  # 指数バックオフ、最大30秒
-                    logger.info(f"Reconnecting in {wait_time} seconds (attempt {self._reconnect_attempts})")
+                    wait_time = min(
+                        2**self._reconnect_attempts, 30
+                    )  # 指数バックオフ、最大30秒
+                    logger.info(
+                        f"Reconnecting in {wait_time} seconds (attempt {self._reconnect_attempts})"
+                    )
                     await asyncio.sleep(wait_time)
                 else:
                     logger.error("Max reconnection attempts reached")
                     break
-        
+
         logger.info("MEXC WebSocket loop ended")
-    
+
     async def _websocket_connection(self):
         """WebSocket接続処理"""
-        
+
         async with websockets.connect(self.ws_url) as websocket:
             self._websocket = websocket
             self._reconnect_attempts = 0  # 成功したらリセット
-            
+
             logger.info("WebSocket connected, subscribing to tickers...")
-            
+
             # sub.tickers チャネルを購読
-            subscribe_msg = {
-                "method": "sub.tickers",
-                "param": {}
-            }
+            subscribe_msg = {"method": "sub.tickers", "param": {}}
             await websocket.send(json.dumps(subscribe_msg))
             logger.info("Subscribed to sub.tickers channel")
-            
+
             # メッセージ受信ループ
             async for message in websocket:
                 try:
                     data = json.loads(message)
-                    
+
                     # 購読確認メッセージ
                     if data.get("channel") == "rs.sub.tickers":
                         logger.info(f"Subscription confirmed: {data.get('data')}")
                         continue
-                    
+
                     # ティッカーデータ処理
                     if data.get("channel") == "push.tickers" and "data" in data:
                         tickers = data["data"]
                         if isinstance(tickers, list):
-                            logger.info(f"📊 MEXC WebSocket received {len(tickers)} tickers")
-                            
+                            logger.info(
+                                f"📊 MEXC WebSocket received {len(tickers)} tickers"
+                            )
+
                             # 各ティッカーを処理
                             if self.tick_callback:
+                                logger.info(
+                                    f"🔧 Processing {len(tickers)} tickers with callback"
+                                )
+                                processed_count = 0
                                 for ticker in tickers:
                                     if isinstance(ticker, dict):
                                         symbol = ticker.get("symbol", "")
                                         price = float(ticker.get("lastPrice", 0))
                                         volume = float(ticker.get("volume24", 0))
-                                        
+
                                         if symbol and price > 0:
-                                            # 銘柄名を正規化（_を削除してUSDT形式に）
-                                            normalized_symbol = symbol.replace("_", "")
-                                            
+                                            # 銘柄名はそのまま使用（MEXCとBybit形式が一致）
+                                            # 例: "BTC_USDT" → "BTC_USDT"（変更なし）
+
                                             tick = TickData(
-                                                symbol=normalized_symbol,
+                                                symbol=symbol,
                                                 price=price,
                                                 timestamp=datetime.now(),
-                                                volume=volume
+                                                volume=volume,
                                             )
-                                            
+
                                             try:
                                                 self.tick_callback(tick)
+                                                processed_count += 1
                                             except Exception as e:
-                                                logger.error(f"Error in tick callback: {e}")
-                
+                                                logger.error(
+                                                    f"Error in tick callback for {symbol}: {e}"
+                                                )
+
+                                if processed_count % 500 == 0 and processed_count > 0:
+                                    logger.info(
+                                        f"✅ Processed {processed_count} ticks via callback"
+                                    )
+                            else:
+                                logger.warning("No tick callback set!")
+
                 except json.JSONDecodeError:
                     logger.warning(f"Non-JSON message received: {message[:100]}...")
                 except Exception as e:
                     logger.error(f"Error processing WebSocket message: {e}")
-                    
+
                 if self.shutdown_event.is_set():
                     break
-
-
 
 
 class MEXCRESTClient:

@@ -17,15 +17,16 @@ from loguru import logger as loguru_logger
 # グローバルロガー
 logger = loguru_logger
 
+from bybit_client import BybitClient
+
 # 自作モジュール
 from config import Config
 from data_manager import DataManager
 from mexc_client import MEXCClient, TickData
-from bybit_client import BybitClient
-from symbol_mapper import SymbolMapper
 from position_manager import PositionManager
 from questdb_client import QuestDBClient, QuestDBTradeRecordManager
 from strategy import SignalType, TradingStrategy
+from symbol_mapper import SymbolMapper
 
 
 class TradeMini:
@@ -92,7 +93,7 @@ class TradeMini:
             self.config.log_file,
             level=self.config.log_level,
             rotation=f"{self.config.get('logging.max_size_mb', 10)} MB",
-            retention=self.config.get('logging.backup_count', 5),
+            retention=self.config.get("logging.backup_count", 5),
             encoding="utf-8",
         )
 
@@ -132,7 +133,7 @@ class TradeMini:
                 self.config.bybit_api_key,
                 self.config.bybit_api_secret,
                 self.config.bybit_environment,
-                self.config.bybit_api_url
+                self.config.bybit_api_url,
             )
             logger.info("Bybit client created")
 
@@ -183,12 +184,16 @@ class TradeMini:
     def _on_tick_received(self, tick: TickData):
         """ティックデータ受信時のコールバック（超高速処理優先）"""
         try:
+            # デバッグ：コールバック呼び出し確認
+            if self.stats["ticks_processed"] % 100 == 0:
+                logger.info(f"🔄 Tick callback called: {tick.symbol} @ {tick.price}")
+
             # 統計更新
             self.stats["ticks_processed"] += 1
 
             # ⚡ 最優先：即座にトレーディング分析
             trading_exchange = self.config.get("trading.exchange", "bybit")
-            
+
             if trading_exchange == "bybit":
                 # Bybitで取引可能な銘柄のみ戦略分析
                 if self.symbol_mapper.is_tradeable_on_bybit(tick.symbol):
@@ -227,10 +232,10 @@ class TradeMini:
             await asyncio.get_event_loop().run_in_executor(
                 None, self.data_manager.add_tick, tick
             )
-            
+
             # QuestDB保存（非同期キューに追加のみ - ブロックしない）
             self.questdb_client.save_tick_data(tick)
-            
+
         except Exception as e:
             logger.error(f"Error in background data processing for {tick.symbol}: {e}")
 
@@ -363,7 +368,9 @@ class TradeMini:
             )
 
             logger.info(f"QuestDB ticks saved: {questdb_stats.get('ticks_saved', 0)}")
-            logger.info(f"Tradeable symbols on Bybit: {symbol_stats.get('total_tradeable_symbols', 0)}")
+            logger.info(
+                f"Tradeable symbols on Bybit: {symbol_stats.get('total_tradeable_symbols', 0)}"
+            )
             logger.info("=============================")
 
         except Exception as e:

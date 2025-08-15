@@ -32,33 +32,33 @@ bybit:
 
 # 取引戦略パラメータ
 strategy:
-    # N秒前の価格と比較（N=1の場合は1秒前と直接比較）
-    price_comparison_seconds: 1
+    # N秒前の価格と比較（現実的な時間枠）
+    price_comparison_seconds: 5
 
-    # 上昇トリガー閾値（X%）- 保守的設定
-    long_threshold_percent: 5.0
+    # 上昇トリガー閾値（X%）- アクティブな取引のため
+    long_threshold_percent: 2.0
 
-    # 下落トリガー閾値（Y%）- 保守的設定
-    short_threshold_percent: 5.0
+    # 下落トリガー閾値（Y%）- アクティブな取引のため
+    short_threshold_percent: 2.0
 
-    # 利確判定の反発閾値（Z%）- 保守的設定
-    reversal_threshold_percent: 2.0
+    # 利確判定の反発閾値（Z%）- トレンドフォロー戦略
+    reversal_threshold_percent: 1.5
 
-    # 最小利益率（M%）- 保守的設定
-    min_profit_percent: 1.0
+    # 最小利益率（M%）- 効率的な利確
+    min_profit_percent: 0.8
 
 # ポジション管理
 position:
-    # 全資産に対する使用比率（α%）- 非常に保守的
-    capital_usage_percent: 1.0
+    # 全資産に対する使用比率（1ポジションあたり）- 2倍逆行で総資産10%損失リスク想定
+    capital_usage_percent: 3.5
 
-    # 同時保有可能な最大銘柄数 - 保守的
-    max_concurrent_positions: 1
+    # 同時保有可能な最大銘柄数 - ユーザー要求通り3本まで
+    max_concurrent_positions: 3
 
     # クロスマージン切替閾値（USDT）
     cross_margin_threshold: 1000.0
 
-    # 2倍逆行時の最大損失率（%）
+    # 2倍逆行時の最大損失率（%）- ユーザー要求通り
     max_loss_on_2x_reversal: 10.0
 
 # データ管理
