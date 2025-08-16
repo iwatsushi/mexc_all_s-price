@@ -180,6 +180,7 @@ class MEXCWebSocketClient:
                             )
 
                             # 各ティッカーを処理
+                            logger.info(f"🔍 tick_callback status: {self.tick_callback is not None}")
                             if self.tick_callback:
                                 logger.info(
                                     f"🔧 Processing {len(tickers)} tickers with callback"
