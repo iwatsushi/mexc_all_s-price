@@ -211,9 +211,9 @@ class MEXCWebSocketClient:
                             logger.info(
                                 f"📊 MEXC WebSocket received {len(tickers)} tickers (全銘柄)"
                             )
-                            # 🔧 デバッグ: コールバック処理を完全に無効化してメッセージ受信のみテスト
-                            logger.info(f"🔧 DEBUG: Skipping callback processing for {len(tickers)} tickers to test pure message reception")
-                            # self._process_ticker_data(tickers)  # 一時的に無効化
+                            # 🚀 高速処理：WebSocket受信を保護するため、最小限の処理のみ
+                            # 重い処理は非同期キューで分離
+                            self._process_ticker_data_safe(tickers)
                     
                     
                     # 未処理のメッセージをログ出力（デバッグ用）
@@ -238,15 +238,17 @@ class MEXCWebSocketClient:
             if 'ping_task' in locals():
                 ping_task.cancel()
 
-    def _process_ticker_data(self, tickers):
-        """ティッカーデータを処理"""
+    def _process_ticker_data_safe(self, tickers):
+        """WebSocket受信を保護する高速ティッカーデータ処理"""
         if not self.tick_callback:
             logger.warning("No tick callback set!")
             return
             
-        logger.info(f"🔧 Processing {len(tickers)} tickers with callback")
+        # 📊 統計のみ（瞬時）
+        logger.debug(f"🚀 Fast processing {len(tickers)} tickers")
         processed_count = 0
         
+        # 🎯 最小限の処理：TickDataオブジェクト作成と非同期キューイング
         for ticker in tickers:
             if isinstance(ticker, dict):
                 symbol = ticker.get("symbol", "")
@@ -262,13 +264,21 @@ class MEXCWebSocketClient:
                     )
 
                     try:
+                        # 🚀 重要：同期コールバックで即座に処理（最小限）
+                        # 重い処理（戦略分析・DB保存）は内部で非同期化される
                         self.tick_callback(tick)
                         processed_count += 1
                     except Exception as e:
+                        # エラーログは出すが、WebSocket受信は継続
                         logger.error(f"Error in tick callback for {symbol}: {e}")
 
         if processed_count > 0:
-            logger.info(f"✅ Processed {processed_count} ticks via callback")
+            logger.debug(f"✅ Fast processed {processed_count} ticks")
+
+    def _process_ticker_data(self, tickers):
+        """従来のティッカーデータ処理（互換性維持）"""
+        # 新しい安全な処理に移譲
+        self._process_ticker_data_safe(tickers)
 
     async def _send_periodic_ping(self, websocket):
         """定期的にpingメッセージを送信してWebSocket接続を維持"""

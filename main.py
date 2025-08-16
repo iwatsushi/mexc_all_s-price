@@ -191,16 +191,25 @@ class TradeMini:
             raise
 
     def _on_tick_received(self, tick: TickData):
-        """ティックデータ受信時のコールバック（超高速処理優先）"""
+        """ティックデータ受信時のコールバック（WebSocket保護最優先）"""
         try:
-            # 統計更新
+            # 🚀 超高速処理：統計更新のみ（WebSocket受信を保護）
             self.stats["ticks_processed"] += 1
 
-            # ⚡ 重要：データ管理を先に実行（価格変動率計算に必要）
-            # 同期実行で即座に蓄積（メモリ操作なので高速）
+            # 🚀 最小限の同期処理：メモリ操作のみ（瞬時）
             self.data_manager.add_tick(tick)
 
-            # ⚡ 最優先：即座にトレーディング分析
+            # 🔄 重い処理は全て非同期で分離（WebSocket受信をブロックしない）
+            asyncio.create_task(self._process_tick_async(tick))
+
+        except Exception as e:
+            # エラーログは出すが、WebSocket受信は継続
+            logger.error(f"Error in tick reception for {tick.symbol}: {e}")
+
+    async def _process_tick_async(self, tick: TickData):
+        """非同期ティック処理（重い処理を分離してWebSocket受信を保護）"""
+        try:
+            # ⚡ 戦略分析（非同期で実行）
             trading_exchange = self.config.get("trading.exchange", "bybit")
 
             signal = None
@@ -217,11 +226,11 @@ class TradeMini:
                 signal = self.strategy.analyze_tick(tick)
                 price_change_percent = self._get_price_change_from_strategy(tick.symbol)
 
-            # 非同期で変動率統計を更新（メインスレッドをブロックしない）
+            # 🔄 変動率統計を非同期で更新
             if price_change_percent != 0.0:
-                asyncio.create_task(self._update_price_change_stats(tick.symbol, price_change_percent))
+                await self._update_price_change_stats(tick.symbol, price_change_percent)
             
-            # デバッグ：価格変動率の状況を確認（100ティックごと）
+            # 📊 デバッグ：価格変動率の状況を確認（100ティックごと）
             if self.stats["ticks_processed"] % 100 == 0:
                 # データ蓄積状況をチェック
                 symbol_data = self.data_manager.get_symbol_data(tick.symbol)
@@ -231,7 +240,7 @@ class TradeMini:
                 logger.info(f"⚡ Debug: {tick.symbol} 変動率: {price_change_percent:.3f}% (処理済み: {self.stats['ticks_processed']}) "
                            f"データ数: {data_count}, 範囲: {time_range[0]} - {time_range[1]}")
 
-            # ⚡ シグナル処理（最優先）
+            # ⚡ シグナル処理（非同期で実行）
             if signal and signal.signal_type != SignalType.NONE:
                 self.stats["signals_generated"] += 1
                 logger.info(
@@ -239,19 +248,18 @@ class TradeMini:
                     f"変動率: {price_change_percent:.3f}% - {signal.reason}"
                 )
 
-                # シグナル処理を最優先で実行
-                asyncio.create_task(self._process_signal(signal))
+                # シグナル処理を非同期で実行
+                await self._process_signal(signal)
 
             # ⚡ ポジション PnL 更新（既存ポジションがある場合のみ）
             if tick.symbol in self.position_manager.get_position_symbols():
                 self.position_manager.update_position_pnl(tick.symbol, tick.price)
 
-            # 🔄 QuestDB保存のみ（最低優先度）- 非同期で実行してメインスレッドをブロックしない
-            # トレーディング判断に影響しないよう、バックグラウンドで処理
-            asyncio.create_task(self._background_questdb_save(tick))
+            # 🔄 QuestDB保存（最低優先度）- バックグラウンドで処理
+            await self._background_questdb_save(tick)
 
         except Exception as e:
-            logger.error(f"Error processing tick data for {tick.symbol}: {e}")
+            logger.error(f"Error in async tick processing for {tick.symbol}: {e}")
 
     async def _background_questdb_save(self, tick: TickData):
         """バックグラウンドでのQuestDB保存処理（トレーディングをブロックしない）"""
