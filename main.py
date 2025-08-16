@@ -67,6 +67,15 @@ class TradeMini:
             "trades_executed": 0,
             "uptime": 0.0,
         }
+        
+        # 変動率統計（非同期収集）
+        self.price_changes = {
+            "max_change": 0.0,
+            "max_change_symbol": "",
+            "max_change_direction": "",
+            "last_report_time": datetime.now(),
+            "changes_since_last_report": 0,
+        }
 
         # 統計表示タイマー
         self.stats_timer = None
@@ -184,31 +193,36 @@ class TradeMini:
     def _on_tick_received(self, tick: TickData):
         """ティックデータ受信時のコールバック（超高速処理優先）"""
         try:
-            # デバッグ：コールバック呼び出し確認
-            if self.stats["ticks_processed"] % 100 == 0:
-                logger.info(f"🔄 Tick callback called: {tick.symbol} @ {tick.price}")
-
             # 統計更新
             self.stats["ticks_processed"] += 1
 
             # ⚡ 最優先：即座にトレーディング分析
             trading_exchange = self.config.get("trading.exchange", "bybit")
 
+            signal = None
+            price_change_percent = 0.0
+            
             if trading_exchange == "bybit":
                 # Bybitで取引可能な銘柄のみ戦略分析
                 if self.symbol_mapper.is_tradeable_on_bybit(tick.symbol):
                     signal = self.strategy.analyze_tick(tick)
-                else:
-                    signal = None
+                    # 変動率を取得（戦略から）
+                    price_change_percent = self._get_price_change_from_strategy(tick.symbol)
             else:
                 # MEXC取引の場合は全銘柄で戦略分析
                 signal = self.strategy.analyze_tick(tick)
+                price_change_percent = self._get_price_change_from_strategy(tick.symbol)
+
+            # 非同期で変動率統計を更新（メインスレッドをブロックしない）
+            if price_change_percent != 0.0:
+                asyncio.create_task(self._update_price_change_stats(tick.symbol, price_change_percent))
 
             # ⚡ シグナル処理（最優先）
             if signal and signal.signal_type != SignalType.NONE:
                 self.stats["signals_generated"] += 1
                 logger.info(
-                    f"🚨 SIGNAL: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f} - {signal.reason}"
+                    f"🚨 SIGNAL: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f} "
+                    f"変動率: {price_change_percent:.3f}% - {signal.reason}"
                 )
 
                 # シグナル処理を最優先で実行
@@ -239,6 +253,49 @@ class TradeMini:
         except Exception as e:
             logger.error(f"Error in background data processing for {tick.symbol}: {e}")
 
+    def _get_price_change_from_strategy(self, symbol: str) -> float:
+        """戦略から価格変動率を取得"""
+        try:
+            # 戦略から最新の価格変動率を取得
+            if hasattr(self.strategy, 'get_price_change_percent'):
+                return self.strategy.get_price_change_percent(symbol)
+            return 0.0
+        except Exception:
+            return 0.0
+
+    async def _update_price_change_stats(self, symbol: str, change_percent: float):
+        """変動率統計を非同期で更新"""
+        try:
+            abs_change = abs(change_percent)
+            
+            # 最大変動率の更新
+            if abs_change > abs(self.price_changes["max_change"]):
+                self.price_changes["max_change"] = change_percent
+                self.price_changes["max_change_symbol"] = symbol
+                self.price_changes["max_change_direction"] = "上昇" if change_percent > 0 else "下落"
+            
+            self.price_changes["changes_since_last_report"] += 1
+            
+            # 30秒ごとに最大変動率をレポート
+            now = datetime.now()
+            if (now - self.price_changes["last_report_time"]).total_seconds() >= 30:
+                if self.price_changes["changes_since_last_report"] > 0:
+                    logger.info(
+                        f"📈 最大変動率: {self.price_changes['max_change_symbol']} "
+                        f"{self.price_changes['max_change']:.3f}% ({self.price_changes['max_change_direction']}) "
+                        f"- {self.price_changes['changes_since_last_report']}銘柄分析済み"
+                    )
+                
+                # 統計リセット
+                self.price_changes["max_change"] = 0.0
+                self.price_changes["max_change_symbol"] = ""
+                self.price_changes["max_change_direction"] = ""
+                self.price_changes["last_report_time"] = now
+                self.price_changes["changes_since_last_report"] = 0
+                
+        except Exception as e:
+            logger.error(f"Error updating price change stats: {e}")
+
     async def _process_signal(self, signal):
         """取引シグナル処理"""
         try:
@@ -259,10 +316,12 @@ class TradeMini:
         side = signal.signal_type.value
         entry_price = signal.price
 
+        logger.info(f"🔄 ENTRY処理開始: {symbol} {side} @ {entry_price:.6f}")
+
         # ポジション開設可能性チェック
         can_open, reason = self.position_manager.can_open_position(symbol)
         if not can_open:
-            logger.info(f"Cannot open position for {symbol}: {reason}")
+            logger.warning(f"❌ ENTRY拒否: {symbol} {side} - 理由: {reason}")
             return
 
         # ポジション開設
@@ -271,7 +330,10 @@ class TradeMini:
         )
 
         if success and position:
-            logger.info(f"Position opened successfully: {symbol} {side}")
+            logger.info(
+                f"✅ ENTRY成功: {symbol} {side} @ {entry_price:.6f} "
+                f"サイズ: {position.size:.4f} レバレッジ: {position.max_leverage:.1f}x"
+            )
             self.stats["trades_executed"] += 1
 
             # 戦略にポジションを登録
@@ -281,14 +343,16 @@ class TradeMini:
 
             # 取引記録
             trade_id = self.trade_record_manager.record_trade_open(position)
-            logger.info(f"Trade recorded with ID: {trade_id}")
+            logger.info(f"📝 取引記録作成: ID={trade_id}")
 
         else:
-            logger.error(f"Failed to open position: {message}")
+            logger.error(f"❌ ENTRY失敗: {symbol} {side} - {message}")
 
     async def _process_exit_signal(self, signal):
         """決済シグナル処理"""
         symbol = signal.symbol
+
+        logger.info(f"🔄 EXIT処理開始: {symbol} @ {signal.price:.6f} - 理由: {signal.reason}")
 
         # ポジション決済
         success, message, position = self.position_manager.close_position(
@@ -296,19 +360,23 @@ class TradeMini:
         )
 
         if success and position:
-            logger.info(f"Position closed successfully: {symbol} {position.side}")
+            # PnL計算
+            realized_pnl = position.unrealized_pnl
+            pnl_percent = (realized_pnl / (position.entry_price * position.size)) * 100
+            
+            logger.info(
+                f"✅ EXIT成功: {symbol} {position.side} @ {signal.price:.6f} "
+                f"PnL: {realized_pnl:.2f} USDT ({pnl_percent:.2f}%)"
+            )
 
             # 戦略からポジションを削除
             tracker = self.strategy.remove_position(symbol)
 
-            # PnL計算
-            realized_pnl = position.unrealized_pnl
-
             # 取引記録を更新（簡略化）
-            logger.info(f"Trade closed: PnL = {realized_pnl:.2f} USDT")
+            logger.info(f"📝 取引完了記録: {symbol} 総利益 {realized_pnl:.2f} USDT")
 
         else:
-            logger.error(f"Failed to close position: {message}")
+            logger.error(f"❌ EXIT失敗: {symbol} - {message}")
 
     def _start_stats_timer(self):
         """統計表示タイマー開始"""

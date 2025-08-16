@@ -96,6 +96,9 @@ class TradingStrategy:
             "total_positions_tracked": 0,
         }
 
+        # 価格変動率キャッシュ（最新分析結果）
+        self.price_changes: Dict[str, float] = {}
+
         # スレッドセーフティ
         self._lock = threading.Lock()
 
@@ -146,6 +149,10 @@ class TradingStrategy:
         change_percent = self.data_manager.get_price_change_percent(
             tick.symbol, self.price_comparison_seconds
         )
+
+        # 価格変動率をキャッシュ（メイン処理から取得可能に）
+        if change_percent is not None:
+            self.price_changes[tick.symbol] = change_percent
 
         if change_percent is None:
             return TradingSignal(
@@ -398,3 +405,8 @@ class TradingStrategy:
                     for symbol, tracker in self.position_trackers.items()
                 },
             }
+
+    def get_price_change_percent(self, symbol: str) -> float:
+        """指定銘柄の最新価格変動率を取得"""
+        with self._lock:
+            return self.price_changes.get(symbol, 0.0)
