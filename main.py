@@ -196,6 +196,10 @@ class TradeMini:
             # 統計更新
             self.stats["ticks_processed"] += 1
 
+            # ⚡ 重要：データ管理を先に実行（価格変動率計算に必要）
+            # 同期実行で即座に蓄積（メモリ操作なので高速）
+            self.data_manager.add_tick(tick)
+
             # ⚡ 最優先：即座にトレーディング分析
             trading_exchange = self.config.get("trading.exchange", "bybit")
 
@@ -216,6 +220,16 @@ class TradeMini:
             # 非同期で変動率統計を更新（メインスレッドをブロックしない）
             if price_change_percent != 0.0:
                 asyncio.create_task(self._update_price_change_stats(tick.symbol, price_change_percent))
+            
+            # デバッグ：価格変動率の状況を確認（100ティックごと）
+            if self.stats["ticks_processed"] % 100 == 0:
+                # データ蓄積状況をチェック
+                symbol_data = self.data_manager.get_symbol_data(tick.symbol)
+                data_count = symbol_data.get_data_count() if symbol_data else 0
+                time_range = symbol_data.get_time_range() if symbol_data else (None, None)
+                
+                logger.info(f"⚡ Debug: {tick.symbol} 変動率: {price_change_percent:.3f}% (処理済み: {self.stats['ticks_processed']}) "
+                           f"データ数: {data_count}, 範囲: {time_range[0]} - {time_range[1]}")
 
             # ⚡ シグナル処理（最優先）
             if signal and signal.signal_type != SignalType.NONE:
@@ -232,26 +246,21 @@ class TradeMini:
             if tick.symbol in self.position_manager.get_position_symbols():
                 self.position_manager.update_position_pnl(tick.symbol, tick.price)
 
-            # 🔄 データ管理・保存（最低優先度）- 非同期で実行してメインスレッドをブロックしない
+            # 🔄 QuestDB保存のみ（最低優先度）- 非同期で実行してメインスレッドをブロックしない
             # トレーディング判断に影響しないよう、バックグラウンドで処理
-            asyncio.create_task(self._background_data_processing(tick))
+            asyncio.create_task(self._background_questdb_save(tick))
 
         except Exception as e:
             logger.error(f"Error processing tick data for {tick.symbol}: {e}")
 
-    async def _background_data_processing(self, tick: TickData):
-        """バックグラウンドでのデータ管理・保存処理（トレーディングをブロックしない）"""
+    async def _background_questdb_save(self, tick: TickData):
+        """バックグラウンドでのQuestDB保存処理（トレーディングをブロックしない）"""
         try:
-            # データ管理に追加（ロック処理があるため非同期で実行）
-            await asyncio.get_event_loop().run_in_executor(
-                None, self.data_manager.add_tick, tick
-            )
-
             # QuestDB保存（非同期キューに追加のみ - ブロックしない）
             self.questdb_client.save_tick_data(tick)
 
         except Exception as e:
-            logger.error(f"Error in background data processing for {tick.symbol}: {e}")
+            logger.error(f"Error in background QuestDB save for {tick.symbol}: {e}")
 
     def _get_price_change_from_strategy(self, symbol: str) -> float:
         """戦略から価格変動率を取得"""
@@ -276,9 +285,9 @@ class TradeMini:
             
             self.price_changes["changes_since_last_report"] += 1
             
-            # 30秒ごとに最大変動率をレポート
+            # 15秒ごとに最大変動率をレポート（デバッグ用に短縮）
             now = datetime.now()
-            if (now - self.price_changes["last_report_time"]).total_seconds() >= 30:
+            if (now - self.price_changes["last_report_time"]).total_seconds() >= 15:
                 if self.price_changes["changes_since_last_report"] > 0:
                     logger.info(
                         f"📈 最大変動率: {self.price_changes['max_change_symbol']} "
