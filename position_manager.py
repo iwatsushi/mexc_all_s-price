@@ -124,8 +124,18 @@ class PositionManager:
                         coins = account.get("coin", [])
                         for coin in coins:
                             if coin.get("coin") == "USDT":
-                                self.account_balance = float(coin.get("walletBalance", 0))
-                                self.available_balance = float(coin.get("availableToWithdraw", 0))
+                                # 安全な数値変換（空文字列対応）
+                                wallet_balance = coin.get("walletBalance", "0")
+                                available_balance = coin.get("availableToWithdraw", "0")
+                                
+                                # 空文字列または None の場合は 0 として扱う
+                                if not wallet_balance or wallet_balance == "":
+                                    wallet_balance = "0"
+                                if not available_balance or available_balance == "":
+                                    available_balance = "0"
+                                
+                                self.account_balance = float(wallet_balance)
+                                self.available_balance = float(available_balance)
                                 break
                         if self.account_balance > 0:
                             break
@@ -141,8 +151,15 @@ class PositionManager:
                     assets = balance_response.get("data", [])
                     for asset in assets:
                         if asset.get("currency") == "USDT":
-                            self.account_balance = float(asset.get("availableBalance", 0))
-                            self.available_balance = float(asset.get("availableBalance", 0))
+                            # 安全な数値変換（空文字列対応）
+                            available_balance = asset.get("availableBalance", "0")
+                            
+                            # 空文字列または None の場合は 0 として扱う
+                            if not available_balance or available_balance == "":
+                                available_balance = "0"
+                            
+                            self.account_balance = float(available_balance)
+                            self.available_balance = float(available_balance)
                             break
 
                     logger.info(f"MEXC account balance updated: {self.account_balance} USDT")

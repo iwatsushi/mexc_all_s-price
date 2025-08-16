@@ -87,16 +87,31 @@ class BybitClient:
 
     def _generate_signature(self, timestamp: str, params: str) -> str:
         """署名を生成"""
-        param_str = timestamp + self.api_key + "5000" + params
+        recv_window = "20000"  # 20秒に増加（タイムスタンプ同期問題対応）
+        param_str = timestamp + self.api_key + recv_window + params
         return hmac.new(
             self.api_secret.encode("utf-8"), param_str.encode("utf-8"), hashlib.sha256
         ).hexdigest()
+
+    def _get_server_time(self) -> int:
+        """Bybitサーバー時刻を取得（時刻同期用）"""
+        try:
+            response = self.session.get(f"{self.base_url}/v5/market/time")
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("retCode") == 0:
+                    return int(result.get("result", {}).get("timeSecond", 0)) * 1000
+        except Exception:
+            pass
+        # フォールバック：ローカル時刻を使用
+        return int(time.time() * 1000)
 
     def _send_request(
         self, method: str, endpoint: str, params: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """署名付きリクエストを送信"""
-        timestamp = str(int(time.time() * 1000))
+        # サーバー時刻同期でタイムスタンプエラーを回避
+        timestamp = str(self._get_server_time())
 
         # パラメータを文字列に変換
         if params:
@@ -113,7 +128,7 @@ class BybitClient:
             "X-BAPI-SIGN": signature,
             "X-BAPI-SIGN-TYPE": "2",
             "X-BAPI-TIMESTAMP": timestamp,
-            "X-BAPI-RECV-WINDOW": "5000",
+            "X-BAPI-RECV-WINDOW": "20000",  # 20秒に増加（タイムスタンプ同期問題対応）
             "Content-Type": "application/json",
         }
 
