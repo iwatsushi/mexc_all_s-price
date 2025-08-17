@@ -82,7 +82,7 @@ class MEXCWebSocketClient:
         
         # ping管理（受信ループ内で実行）
         self._last_ping_time = 0
-        self._ping_interval = 20  # 20秒間隔
+        self._ping_interval = 15  # 15秒間隔（MEXC推奨の10-20秒の中間値）
 
     async def connect(self) -> bool:
         """WebSocket接続開始"""
@@ -196,7 +196,7 @@ class MEXCWebSocketClient:
 
             # ping初期化（受信ループ内で管理）
             self._last_ping_time = time.monotonic()
-            logger.info("💓 MEXC ping initialized (20s interval, inline)")
+            logger.info("💓 MEXC ping initialized (15s interval, inline)")
 
             # メッセージ受信ループ（デバッグスクリプトと同じタイムアウト方式を採用）
             last_recv = time.monotonic()  # デバッグスクリプトと同じ単調時間を使用
@@ -248,9 +248,10 @@ class MEXCWebSocketClient:
                     if rx_time - self._last_ping_time >= self._ping_interval:
                         try:
                             ping_msg = {"method": "ping"}
-                            await websocket.send(json.dumps(ping_msg))
+                            ping_json = json.dumps(ping_msg)
+                            await websocket.send(ping_json)
                             self._last_ping_time = rx_time
-                            logger.info("💓 MEXC ping sent (inline)")
+                            logger.info(f"💓 MEXC ping sent (inline): {ping_json}")
                         except Exception as e:
                             logger.warning(f"💓 Failed to send ping: {e}")
 
@@ -312,7 +313,8 @@ class MEXCWebSocketClient:
                 logger.info(f"Subscription confirmed: {data.get('data')}")
                 return
             elif data.get("channel") == "pong":
-                logger.debug("💓 Received pong from server")
+                pong_data = data.get("data", "unknown")
+                logger.info(f"💓 Received pong from server: {pong_data}")
                 return
             else:
                 logger.debug(f"🔍 Unhandled channel: {data.get('channel', 'unknown')}")
