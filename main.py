@@ -3,6 +3,8 @@ Trade Mini - メインアプリケーション
 """
 
 import asyncio
+import gzip
+import json
 import logging
 import multiprocessing
 import signal
@@ -299,15 +301,44 @@ class TradeMini:
                 except:
                     continue  # タイムアウト時は次の循環へ
 
-                # MEXCクライアントからの新しいデータ構造に対応
-                if "raw_data" in batch_data:
-                    # MEXCクライアントからの新しいフォーマット
+                # MEXCクライアントからの生データを処理
+                if "raw_message" in batch_data:
+                    # 生データフォーマット：gzip解凍とチャンネル判定をここで実行
+                    raw_message = batch_data["raw_message"]
+                    batch_timestamp = batch_data["rx_time"]
+                    batch_id = batch_data["message_count"]
+                    
+                    try:
+                        # gzip解凍処理
+                        if isinstance(raw_message, (bytes, bytearray)):
+                            # gzip圧縮されたデータを解凍
+                            decompressed = gzip.decompress(raw_message)
+                            data = json.loads(decompressed)
+                            logger.debug(f"📦 Worker decompressed {len(raw_message)} → {len(decompressed)} bytes")
+                        else:
+                            # 非圧縮データ
+                            data = json.loads(raw_message)
+                        
+                        # チャンネル判定：ティッカーデータのみ処理
+                        if data.get("channel") == "push.tickers" and "data" in data:
+                            tickers = data["data"]
+                        else:
+                            # ティッカーデータ以外はスキップ
+                            logger.debug(f"Skipping non-ticker channel: {data.get('channel', 'unknown')}")
+                            continue
+                            
+                    except (gzip.BadGzipFile, json.JSONDecodeError) as e:
+                        logger.warning(f"Worker failed to decode message: {e}")
+                        continue
+                        
+                elif "raw_data" in batch_data:
+                    # 旧フォーマット（互換性維持）
                     raw_data = batch_data["raw_data"]
                     tickers = raw_data["data"]
                     batch_timestamp = batch_data["rx_time"]
                     batch_id = batch_data["message_count"]
                 else:
-                    # 既存フォーマット（互換性維持）
+                    # さらに古いフォーマット（互換性維持）
                     tickers = batch_data["tickers"]
                     batch_timestamp = batch_data["timestamp"]
                     batch_id = batch_data["batch_id"]

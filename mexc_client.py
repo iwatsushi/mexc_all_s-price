@@ -232,40 +232,19 @@ class MEXCWebSocketClient:
                             )
                     last_ticker_time = rx_time
                     
-                    # 最小限の解凍処理（受信ループで最低限のみ）
-                    try:
-                        if isinstance(raw_message, (bytes, bytearray)):
-                            # gzip圧縮されたデータを解凍
-                            decompressed = gzip.decompress(raw_message)
-                            data = json.loads(decompressed)
-                            logger.debug(f"📦 Decompressed {len(raw_message)} → {len(decompressed)} bytes")
-                        else:
-                            # 非圧縮データ
-                            data = json.loads(raw_message)
-                    except (gzip.BadGzipFile, json.JSONDecodeError) as e:
-                        logger.warning(f"Failed to decode message: {e}")
-                        continue
-                    
-                    # ティッカーデータのみマルチプロセスキューに投入（ノンブロッキング）
-                    if data.get("channel") == "push.tickers" and "data" in data:
-                        if self._data_queue:
-                            try:
-                                self._data_queue.put_nowait({
-                                    "raw_data": data,
-                                    "rx_time": rx_time,
-                                    "message_count": message_count
-                                })
-                                logger.debug(f"✅ Message #{message_count} sent to multiprocess queue")
-                            except:
-                                logger.debug(f"⚠️ Multiprocess queue full, dropping message #{message_count}")
-                    
-                    # その他のメッセージ処理（subscription確認、pong等）
-                    elif data.get("channel") == "rs.sub.tickers":
-                        logger.info(f"Subscription confirmed: {data.get('data')}")
-                    elif data.get("channel") == "pong":
-                        logger.debug("💓 Received pong from server")
+                    # 🚀 超軽量処理：生データをそのままマルチプロセスキューに投入（解凍は後段で）
+                    if self._data_queue:
+                        try:
+                            self._data_queue.put_nowait({
+                                "raw_message": raw_message,
+                                "rx_time": rx_time,
+                                "message_count": message_count
+                            })
+                            logger.debug(f"✅ Raw message #{message_count} sent to multiprocess queue")
+                        except:
+                            logger.debug(f"⚠️ Multiprocess queue full, dropping message #{message_count}")
                     else:
-                        logger.debug(f"🔍 Unhandled channel: {data.get('channel', 'unknown')}")
+                        logger.debug(f"⚠️ Data queue not configured, dropping message #{message_count}")
 
                 except asyncio.TimeoutError:
                     # タイムアウト（1秒間メッセージなし）- スタール検出（デバッグスクリプトと同じ方式）
