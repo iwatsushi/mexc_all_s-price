@@ -77,9 +77,8 @@ class MEXCWebSocketClient:
         self._reconnect_attempts = 0
         self._max_reconnect_attempts = 5
         
-        # ChatGPT5提案: キューベース処理
-        self._message_queue = asyncio.Queue(maxsize=200)
-        self._worker_task = None
+        # マルチプロセスキュー（main.pyから提供される）
+        self._data_queue = None
 
     async def connect(self) -> bool:
         """WebSocket接続開始"""
@@ -87,12 +86,9 @@ class MEXCWebSocketClient:
             logger.info(f"Starting MEXC WebSocket connection: {self.ws_url}")
 
             self.running = True
-            # キューワーカーを開始
-            self._worker_task = asyncio.create_task(self._message_worker())
-            logger.info("🔄 Message worker task created")
             # WebSocketタスクを開始
             self._ws_task = asyncio.create_task(self._websocket_loop())
-            logger.info("🔄 WebSocket task and message worker started")
+            logger.info("🔄 WebSocket task started")
             return True
 
         except Exception as e:
@@ -109,13 +105,6 @@ class MEXCWebSocketClient:
         if self._websocket:
             await self._websocket.close()
 
-        if self._worker_task and not self._worker_task.done():
-            self._worker_task.cancel()
-            try:
-                await self._worker_task
-            except asyncio.CancelledError:
-                pass
-                
         if self._ws_task and not self._ws_task.done():
             self._ws_task.cancel()
             try:
@@ -243,12 +232,40 @@ class MEXCWebSocketClient:
                             )
                     last_ticker_time = rx_time
                     
-                    # キューに生データを投入（非同期、非ブロッキング）
+                    # 最小限の解凍処理（受信ループで最低限のみ）
                     try:
-                        await asyncio.wait_for(self._message_queue.put((rx_time, raw_message)), timeout=0.1)
-                        logger.debug(f"✅ Message #{message_count} queued for processing")
-                    except asyncio.TimeoutError:
-                        logger.warning(f"⚠️ Message queue full, dropping message #{message_count}")
+                        if isinstance(raw_message, (bytes, bytearray)):
+                            # gzip圧縮されたデータを解凍
+                            decompressed = gzip.decompress(raw_message)
+                            data = json.loads(decompressed)
+                            logger.debug(f"📦 Decompressed {len(raw_message)} → {len(decompressed)} bytes")
+                        else:
+                            # 非圧縮データ
+                            data = json.loads(raw_message)
+                    except (gzip.BadGzipFile, json.JSONDecodeError) as e:
+                        logger.warning(f"Failed to decode message: {e}")
+                        continue
+                    
+                    # ティッカーデータのみマルチプロセスキューに投入（ノンブロッキング）
+                    if data.get("channel") == "push.tickers" and "data" in data:
+                        if self._data_queue:
+                            try:
+                                self._data_queue.put_nowait({
+                                    "raw_data": data,
+                                    "rx_time": rx_time,
+                                    "message_count": message_count
+                                })
+                                logger.debug(f"✅ Message #{message_count} sent to multiprocess queue")
+                            except:
+                                logger.debug(f"⚠️ Multiprocess queue full, dropping message #{message_count}")
+                    
+                    # その他のメッセージ処理（subscription確認、pong等）
+                    elif data.get("channel") == "rs.sub.tickers":
+                        logger.info(f"Subscription confirmed: {data.get('data')}")
+                    elif data.get("channel") == "pong":
+                        logger.debug("💓 Received pong from server")
+                    else:
+                        logger.debug(f"🔍 Unhandled channel: {data.get('channel', 'unknown')}")
 
                 except asyncio.TimeoutError:
                     # タイムアウト（1秒間メッセージなし）- スタール検出（デバッグスクリプトと同じ方式）
@@ -268,10 +285,15 @@ class MEXCWebSocketClient:
                     try:
                         # WebSocket状態を安全にチェック（closed属性を使わない）
                         try:
-                            # ping送信で接続状態を確認（最も確実な方法）
-                            await asyncio.wait_for(websocket.ping(), timeout=1.0)
-                            logger.debug("💓 WebSocket ping successful during timeout check")
-                        except (AttributeError, asyncio.TimeoutError, websockets.exceptions.ConnectionClosed) as ping_error:
+                            # ノンブロッキングpingで接続状態を確認
+                            ping_task = asyncio.create_task(websocket.ping())
+                            try:
+                                await asyncio.wait_for(ping_task, timeout=0.5)
+                                logger.debug("💓 WebSocket ping successful during timeout check")
+                            except asyncio.TimeoutError:
+                                ping_task.cancel()
+                                logger.debug("💓 WebSocket ping timeout (continuing)")
+                        except (AttributeError, websockets.exceptions.ConnectionClosed) as ping_error:
                             logger.warning(f"⚠️ WebSocket ping failed: {ping_error}")
                             # ping失敗 = 接続問題の可能性
                             raise websockets.exceptions.ConnectionClosed(None, None)
@@ -364,97 +386,42 @@ class MEXCWebSocketClient:
         # 新しい安全な処理に移譲
         self._process_ticker_data_safe(tickers)
 
-    async def _message_worker(self):
-        """ChatGPT5提案: 受信メッセージの非同期処理ワーカー"""
-        logger.info("🔄 Message worker started")
-        
-        while self.running:
-            try:
-                # キューからメッセージを取得（非ブロッキング）
-                rx_time, raw_message = await asyncio.wait_for(
-                    self._message_queue.get(), timeout=1.0
-                )
-                
-                # 解凍・JSONパース処理（受信ループとは分離）
-                try:
-                    if isinstance(raw_message, (bytes, bytearray)):
-                        # gzip圧縮されたデータを解凍
-                        decompressed = gzip.decompress(raw_message)
-                        data = json.loads(decompressed)
-                        logger.debug(f"📦 Worker decompressed {len(raw_message)} → {len(decompressed)} bytes")
-                    else:
-                        # 非圧縮データ
-                        data = json.loads(raw_message)
-                        
-                except (gzip.BadGzipFile, json.JSONDecodeError) as e:
-                    logger.warning(f"Worker failed to decode message: {e}")
-                    continue
-                
-                # メッセージ処理
-                await self._process_websocket_message(data, rx_time)
-                
-                # キューのタスク完了を通知
-                self._message_queue.task_done()
-                
-            except asyncio.TimeoutError:
-                # キューが空の場合は継続
-                continue
-            except Exception as e:
-                logger.error(f"Message worker error: {e}")
-                
-        logger.info("Message worker ended")
-    
-    async def _process_websocket_message(self, data: dict, rx_time: float):
-        """WebSocketメッセージの処理（ワーカーで実行）"""
-        channel = data.get("channel", "unknown")
-        logger.debug(f"📡 Processing channel: {channel}")
-        
-        # 購読確認メッセージ
-        if channel == "rs.sub.tickers":
-            logger.info(f"Subscription confirmed: {data.get('data')}")
-            return
-            
-        # pongメッセージの処理
-        if channel == "pong":
-            logger.debug("💓 Received pong from server")
-            return
-            
-        # ティッカーデータ処理（全銘柄）
-        if channel == "push.tickers" and "data" in data:
-            tickers = data["data"]
-            if isinstance(tickers, list):
-                # 軽量ログ
-                current_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                logger.info(
-                    f"📊 [{current_time}] Processing {len(tickers)} tickers"
-                )
-                
-                # バッチコールバック優先
-                if self.batch_callback:
-                    self._process_ticker_batch_safe(tickers)
-                else:
-                    # 従来の個別tick処理（互換性維持）
-                    self._process_ticker_data_safe(tickers)
-            return
-            
-        # 未処理のメッセージ
-        logger.debug(f"🔍 Unhandled message: {json.dumps(data)[:200]}...")
+    def set_data_queue(self, data_queue):
+        """マルチプロセスキューを設定"""
+        self._data_queue = data_queue
+        logger.info("✅ Multiprocess data queue configured")
     
     async def _send_periodic_ping(self, websocket):
-        """定期的にpingメッセージを送信してWebSocket接続を維持（完全安全版）"""
+        """定期的にpingメッセージを送信してWebSocket接続を維持（ノンブロッキング版）"""
         try:
             while not self.shutdown_event.is_set():
-                await asyncio.sleep(20)  # 20秒間隔でping送信（少し延長）
-                try:
-                    # 最も安全なping送信（closed属性を使わない）
-                    ping_msg = {"method": "ping"}
-                    await asyncio.wait_for(
-                        websocket.send(json.dumps(ping_msg)), timeout=5.0
-                    )
-                    logger.debug("💓 Sent ping to maintain WebSocket connection")
-                except (asyncio.TimeoutError, AttributeError, websockets.exceptions.ConnectionClosed) as e:
-                    logger.warning(f"⚠️ Ping failed: {e}")
+                # ノンブロッキング待機（0.1秒刻みで中断可能）
+                for _ in range(200):  # 20秒間を0.1秒刻みで分割
+                    if self.shutdown_event.is_set():
+                        break
+                    await asyncio.sleep(0.1)
+                
+                if self.shutdown_event.is_set():
                     break
+                    
+                try:
+                    # ノンブロッキングping送信
+                    ping_msg = {"method": "ping"}
+                    # send_nowaitを使用してノンブロッキング送信
+                    if hasattr(websocket, 'send_nowait'):
+                        websocket.send_nowait(json.dumps(ping_msg))
+                        logger.debug("💓 Sent ping to maintain WebSocket connection (non-blocking)")
+                    else:
+                        # フォールバック：短いタイムアウトで送信
+                        await asyncio.wait_for(
+                            websocket.send(json.dumps(ping_msg)), timeout=0.5
+                        )
+                        logger.debug("💓 Sent ping to maintain WebSocket connection (fallback)")
+                except (AttributeError, websockets.exceptions.ConnectionClosed) as e:
+                    logger.warning(f"⚠️ Non-blocking ping failed: {e}")
+                    break
+                except asyncio.TimeoutError:
+                    logger.debug("💓 Ping timeout (continuing)")
                 except Exception as e:
                     logger.warning(f"Failed to send ping: {e}")
                     break

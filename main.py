@@ -154,7 +154,9 @@ class TradeMini:
         try:
             # MEXC クライアント（ティックデータ取得用）
             self.mexc_client = MEXCClient(self.config)
-            logger.info("MEXC client created")
+            # マルチプロセスキューを設定
+            self.mexc_client.set_data_queue(self.data_queue)
+            logger.info("MEXC client created and data queue configured")
 
             # Bybit クライアント（注文・決済用）
             self.bybit_client = BybitClient(
@@ -297,9 +299,18 @@ class TradeMini:
                 except:
                     continue  # タイムアウト時は次の循環へ
 
-                tickers = batch_data["tickers"]
-                batch_timestamp = batch_data["timestamp"]
-                batch_id = batch_data["batch_id"]
+                # MEXCクライアントからの新しいデータ構造に対応
+                if "raw_data" in batch_data:
+                    # MEXCクライアントからの新しいフォーマット
+                    raw_data = batch_data["raw_data"]
+                    tickers = raw_data["data"]
+                    batch_timestamp = batch_data["rx_time"]
+                    batch_id = batch_data["message_count"]
+                else:
+                    # 既存フォーマット（互換性維持）
+                    tickers = batch_data["tickers"]
+                    batch_timestamp = batch_data["timestamp"]
+                    batch_id = batch_data["batch_id"]
 
                 # 🚀 高速処理（JSONからQuestDB形式への直接変換）
                 TradeMini._process_batch_lightning_fast(
