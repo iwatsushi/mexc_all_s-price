@@ -156,9 +156,7 @@ class TradeMini:
         try:
             # MEXC クライアント（ティックデータ取得用）
             self.mexc_client = MEXCClient(self.config)
-            # マルチプロセスキューを設定
-            self.mexc_client.set_data_queue(self.data_queue)
-            logger.info("MEXC client created and data queue configured")
+            logger.info("MEXC client created")
 
             # Bybit クライアント（注文・決済用）
             self.bybit_client = BybitClient(
@@ -301,47 +299,10 @@ class TradeMini:
                 except:
                     continue  # タイムアウト時は次の循環へ
 
-                # MEXCクライアントからの生データを処理
-                if "raw_message" in batch_data:
-                    # 生データフォーマット：gzip解凍とチャンネル判定をここで実行
-                    raw_message = batch_data["raw_message"]
-                    batch_timestamp = batch_data["rx_time"]
-                    batch_id = batch_data["message_count"]
-                    
-                    try:
-                        # gzip解凍処理
-                        if isinstance(raw_message, (bytes, bytearray)):
-                            # gzip圧縮されたデータを解凍
-                            decompressed = gzip.decompress(raw_message)
-                            data = json.loads(decompressed)
-                            logger.debug(f"📦 Worker decompressed {len(raw_message)} → {len(decompressed)} bytes")
-                        else:
-                            # 非圧縮データ
-                            data = json.loads(raw_message)
-                        
-                        # チャンネル判定：ティッカーデータのみ処理
-                        if data.get("channel") == "push.tickers" and "data" in data:
-                            tickers = data["data"]
-                        else:
-                            # ティッカーデータ以外はスキップ
-                            logger.debug(f"Skipping non-ticker channel: {data.get('channel', 'unknown')}")
-                            continue
-                            
-                    except (gzip.BadGzipFile, json.JSONDecodeError) as e:
-                        logger.warning(f"Worker failed to decode message: {e}")
-                        continue
-                        
-                elif "raw_data" in batch_data:
-                    # 旧フォーマット（互換性維持）
-                    raw_data = batch_data["raw_data"]
-                    tickers = raw_data["data"]
-                    batch_timestamp = batch_data["rx_time"]
-                    batch_id = batch_data["message_count"]
-                else:
-                    # さらに古いフォーマット（互換性維持）
-                    tickers = batch_data["tickers"]
-                    batch_timestamp = batch_data["timestamp"]
-                    batch_id = batch_data["batch_id"]
+                # 既存フォーマットに戻す
+                tickers = batch_data["tickers"]
+                batch_timestamp = batch_data["timestamp"]
+                batch_id = batch_data["batch_id"]
 
                 # 🚀 高速処理（JSONからQuestDB形式への直接変換）
                 TradeMini._process_batch_lightning_fast(
