@@ -85,23 +85,37 @@ class QuestDBClient:
         logger.info(f"QuestDB client initialized: {self.host}:{self.ilp_port}")
 
     def _test_connection(self) -> bool:
-        """QuestDB接続テスト"""
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(5.0)
-            result = sock.connect_ex((self.host, self.ilp_port))
-            sock.close()
+        """QuestDB接続テスト（リトライ機能付き）"""
+        max_retries = 5
+        retry_delay = 2
+        
+        for attempt in range(max_retries):
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(10.0)
+                result = sock.connect_ex((self.host, self.ilp_port))
+                sock.close()
 
-            if result == 0:
-                logger.info("QuestDB connection test successful")
-                return True
-            else:
-                logger.warning(f"QuestDB connection test failed: {result}")
-                return False
+                if result == 0:
+                    logger.info(f"QuestDB connection test successful (attempt {attempt + 1})")
+                    return True
+                else:
+                    if attempt < max_retries - 1:
+                        logger.debug(f"QuestDB connection attempt {attempt + 1} failed: {result}, retrying in {retry_delay}s...")
+                        time.sleep(retry_delay)
+                    else:
+                        logger.warning(f"QuestDB connection test failed after {max_retries} attempts: {result}")
+                        return False
 
-        except Exception as e:
-            logger.error(f"QuestDB connection test error: {e}")
-            return False
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.debug(f"QuestDB connection attempt {attempt + 1} error: {e}, retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+                else:
+                    logger.warning(f"QuestDB connection test error after {max_retries} attempts: {e}")
+                    return False
+        
+        return False
 
     def _start_workers(self):
         """ワーカースレッド開始"""
@@ -118,20 +132,38 @@ class QuestDBClient:
         logger.info("QuestDB worker threads started")
 
     def _send_ilp_data(self, data: str) -> bool:
-        """ILPデータをQuestDBに送信"""
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(10.0)
-            sock.connect((self.host, self.ilp_port))
-            sock.sendall(data.encode("utf-8"))
-            sock.close()
-            return True
+        """ILPデータをQuestDBに送信（リトライ機能付き）"""
+        max_retries = 3
+        retry_delay = 1
+        
+        for attempt in range(max_retries):
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(10.0)
+                sock.connect((self.host, self.ilp_port))
+                sock.sendall(data.encode("utf-8"))
+                sock.close()
+                
+                # 成功時はエラーカウントをリセット
+                with self._lock:
+                    if self.stats["write_errors"] > 0:
+                        logger.info(f"QuestDB ILP connection restored after {self.stats['write_errors']} errors")
+                        self.stats["write_errors"] = 0
+                
+                return True
 
-        except Exception as e:
-            logger.error(f"Failed to send ILP data: {e}")
-            with self._lock:
-                self.stats["write_errors"] += 1
-            return False
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                else:
+                    # 最終試行失敗時のみエラーログ（頻度削減）
+                    with self._lock:
+                        self.stats["write_errors"] += 1
+                        if self.stats["write_errors"] % 10 == 1:
+                            logger.warning(f"QuestDB ILP connection failed after {max_retries} retries (error #{self.stats['write_errors']}): {e}")
+                    return False
+        
+        return False
 
     def _tick_worker(self):
         """ティックデータワーカー"""
