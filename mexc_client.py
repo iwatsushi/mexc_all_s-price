@@ -65,7 +65,9 @@ class MEXCWebSocketClient:
 
         # データコールバック
         self.tick_callback: Optional[Callable[[TickData], None]] = None
-        self.batch_callback: Optional[Callable[[list], None]] = None  # パターンB'用バッチコールバック
+        self.batch_callback: Optional[Callable[[list], None]] = (
+            None  # パターンB'用バッチコールバック
+        )
 
         # WebSocket関連
         self._ws_task = None
@@ -127,7 +129,7 @@ class MEXCWebSocketClient:
     def set_tick_callback(self, callback: Callable[[TickData], None]):
         """価格データコールバックを設定"""
         self.tick_callback = callback
-        
+
     def set_batch_callback(self, callback: Callable[[list], None]):
         """バッチデータコールバックを設定（パターンB'用）"""
         self.batch_callback = callback
@@ -164,11 +166,11 @@ class MEXCWebSocketClient:
         """WebSocket接続処理"""
 
         async with websockets.connect(
-            self.ws_url, 
-            ping_interval=None,      # 手動pingを使用
-            max_size=None,          # フレームサイズ制限を解除
+            self.ws_url,
+            ping_interval=None,  # 手動pingを使用
+            max_size=None,  # フレームサイズ制限を解除
             open_timeout=20,
-            close_timeout=5
+            close_timeout=5,
         ) as websocket:
             self._websocket = websocket
             self._reconnect_attempts = 0  # 成功したらリセット
@@ -179,19 +181,19 @@ class MEXCWebSocketClient:
             subscribe_msg = {"method": "sub.tickers", "param": {}, "gzip": False}
             await websocket.send(json.dumps(subscribe_msg))
             logger.info("Subscribed to sub.tickers channel (non-compressed)")
-            
+
             # sub.tickersのみに集中（シンプル化）
             logger.info("Focusing on sub.tickers only for continuous data")
-            
+
             # ping定期送信用タスクを開始
             ping_task = asyncio.create_task(self._send_periodic_ping(websocket))
 
             # メッセージ受信ループ（デバッグスクリプトと同じタイムアウト方式を採用）
             last_recv = time.monotonic()  # デバッグスクリプトと同じ単調時間を使用
             message_count = 0
-            
+
             logger.info("🔄 Starting WebSocket message receive loop...")
-            
+
             while not self.shutdown_event.is_set():
                 try:
                     # タイムアウト付きでメッセージを受信（デバッグスクリプトと同じ方式）
@@ -199,21 +201,25 @@ class MEXCWebSocketClient:
                     message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
                     last_recv = time.monotonic()  # デバッグスクリプトと同じ方式
                     message_count += 1
-                    
+
                     # 🚀 重要なメッセージは必ずログ出力（デバッグ用）
-                    logger.info(f"💬 Raw message #{message_count} received: {len(message)} chars")
-                    
+                    logger.info(
+                        f"💬 Raw message #{message_count} received: {len(message)} chars"
+                    )
+
                     data = json.loads(message)
-                    
+
                     # 🔍 デバッグ用：受信データの詳細情報をログ出力
                     channel = data.get("channel", "unknown")
-                    logger.info(f"📡 WebSocket channel: {channel}, data_type: {type(data)}")
+                    logger.info(
+                        f"📡 WebSocket channel: {channel}, data_type: {type(data)}"
+                    )
 
                     # 購読確認メッセージ
                     if data.get("channel") == "rs.sub.tickers":
                         logger.info(f"Subscription confirmed: {data.get('data')}")
                         continue
-                    
+
                     # pongメッセージの処理
                     if data.get("channel") == "pong":
                         logger.debug("💓 Received pong from server")
@@ -228,42 +234,51 @@ class MEXCWebSocketClient:
                             logger.info(
                                 f"📊 [{current_time}] MEXC WebSocket received {len(tickers)} tickers (msg#{message_count})"
                             )
-                            
+
                             # 🔍 デバッグ用：最初の3銘柄の詳細情報
                             if len(tickers) > 0:
-                                sample_symbols = [t.get("symbol", "unknown") for t in tickers[:3] if isinstance(t, dict)]
+                                sample_symbols = [
+                                    t.get("symbol", "unknown")
+                                    for t in tickers[:3]
+                                    if isinstance(t, dict)
+                                ]
                                 logger.info(f"📈 Sample symbols: {sample_symbols}...")
-                            
+
                             # 🚀 パターンB': バッチコールバック優先、個別tick処理は互換性維持のみ
                             if self.batch_callback:
                                 self._process_ticker_batch_safe(tickers)
                             else:
                                 # 従来の個別tick処理（互換性維持）
                                 self._process_ticker_data_safe(tickers)
-                    
-                    
+
                     # 未処理のメッセージをログ出力（デバッグ用）
                     else:
-                        logger.info(f"🔍 Unhandled message: {json.dumps(data)[:200]}...")
+                        logger.info(
+                            f"🔍 Unhandled message: {json.dumps(data)[:200]}..."
+                        )
 
                 except asyncio.TimeoutError:
                     # タイムアウト（1秒間メッセージなし）- スタール検出（デバッグスクリプトと同じ方式）
                     since = time.monotonic() - last_recv
                     if since > 10:  # 10秒でスタール警告
-                        logger.warning(f"⚠️ MEXC WebSocket STALL: {since:.1f}秒間メッセージを受信していません")
+                        logger.warning(
+                            f"⚠️ MEXC WebSocket STALL: {since:.1f}秒間メッセージを受信していません"
+                        )
                         # 再接続をトリガーするために例外を発生
                         raise websockets.exceptions.ConnectionClosed(None, None)
                     elif since > 2:  # 2秒以上でDEBUGログ
-                        logger.info(f"⏰ WebSocket timeout check: {since:.1f}s since last message (total_messages: {message_count})")
+                        logger.info(
+                            f"⏰ WebSocket timeout check: {since:.1f}s since last message (total_messages: {message_count})"
+                        )
                     continue  # タイムアウト時は継続
-                    
+
                 except json.JSONDecodeError:
                     logger.warning(f"Non-JSON message received: {message[:100]}...")
                 except Exception as e:
                     logger.error(f"Error processing WebSocket message: {e}")
-            
+
             # pingタスクをキャンセル
-            if 'ping_task' in locals():
+            if "ping_task" in locals():
                 ping_task.cancel()
 
     def _process_ticker_batch_safe(self, tickers):
@@ -271,34 +286,40 @@ class MEXCWebSocketClient:
         if not self.batch_callback:
             logger.warning("No batch callback set!")
             return
-            
+
         try:
             # 🚀 最小限の前処理：空データ除外のみ（WebSocket受信を絶対保護）
             valid_tickers = []
             for ticker in tickers:
-                if isinstance(ticker, dict) and ticker.get("symbol") and float(ticker.get("lastPrice", 0)) > 0:
+                if (
+                    isinstance(ticker, dict)
+                    and ticker.get("symbol")
+                    and float(ticker.get("lastPrice", 0)) > 0
+                ):
                     valid_tickers.append(ticker)
-            
+
             if valid_tickers:
-                logger.info(f"🎯 Calling batch callback with {len(valid_tickers)} valid tickers")
+                logger.info(
+                    f"🎯 Calling batch callback with {len(valid_tickers)} valid tickers"
+                )
                 # 🚀 重要：バッチ全体を1回のコールバックで処理（WebSocket受信保護）
                 self.batch_callback(valid_tickers)
                 logger.info(f"✅ Batch callback completed successfully")
-                
+
         except Exception as e:
             # エラーログは出すが、WebSocket受信は継続
             logger.error(f"Error in batch callback: {e}")
-    
+
     def _process_ticker_data_safe(self, tickers):
         """WebSocket受信を保護する高速ティッカーデータ処理（互換性維持）"""
         if not self.tick_callback:
             logger.warning("No tick callback set!")
             return
-            
+
         # 📊 統計のみ（瞬時）
         logger.debug(f"🚀 Fast processing {len(tickers)} tickers (legacy mode)")
         processed_count = 0
-        
+
         # 🎯 最小限の処理：TickDataオブジェクト作成と非同期キューイング
         for ticker in tickers:
             if isinstance(ticker, dict):

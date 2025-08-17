@@ -42,7 +42,11 @@ class BybitClient:
     """Bybit REST APIクライアント（先物取引）"""
 
     def __init__(
-        self, api_key: str, api_secret: str, environment: str = "live", base_url: str = None
+        self,
+        api_key: str,
+        api_secret: str,
+        environment: str = "live",
+        base_url: str = None,
     ):
         """
         初期化
@@ -66,7 +70,7 @@ class BybitClient:
             self.base_url = "https://api-demo.bybit.com"  # デモトレード用URL
         else:
             self.base_url = "https://api.bybit.com"  # 本番用URL
-        
+
         logger.info(f"Bybit API URL: {self.base_url} (environment: {environment})")
 
         self.session = requests.Session()

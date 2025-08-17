@@ -4,7 +4,13 @@ MEXC WebSocket 詳細デバッグ用最小実装
 ワイヤレベルのログと自動再接続機能付き
 """
 
-import asyncio, json, time, traceback, logging, sys
+import asyncio
+import json
+import logging
+import sys
+import time
+import traceback
+
 import websockets
 
 URL = "wss://contract.mexc.com/edge"
@@ -17,8 +23,9 @@ logging.basicConfig(
 )
 
 PING_INTERVAL_SEC = 15
-STALL_WARN_SEC = 5          # 受信が5s止まったら警告
-STALL_RESET_SEC = 10        # 受信が10s止まったら再接続
+STALL_WARN_SEC = 5  # 受信が5s止まったら警告
+STALL_RESET_SEC = 10  # 受信が10s止まったら再接続
+
 
 def j(obj, maxlen=300):
     try:
@@ -26,6 +33,7 @@ def j(obj, maxlen=300):
         return s if len(s) <= maxlen else s[:maxlen] + f"...({len(s)} bytes)"
     except Exception:
         return f"<non-json {type(obj)}>"
+
 
 async def mexc_client():
     attempt = 0
@@ -35,8 +43,8 @@ async def mexc_client():
             logging.info(f"CONNECT attempt={attempt} -> {URL}")
             async with websockets.connect(
                 URL,
-                ping_interval=None,     # WSコントロールPingは無効（JSON pingを送る）
-                max_size=None,          # 大きなpush.tickersに備えて上限解除
+                ping_interval=None,  # WSコントロールPingは無効（JSON pingを送る）
+                max_size=None,  # 大きなpush.tickersに備えて上限解除
                 open_timeout=20,
                 close_timeout=5,
             ) as ws:
@@ -45,7 +53,7 @@ async def mexc_client():
                 last_tickers_ts = None
 
                 # 送信: sub.tickers（非圧縮）
-                sub = {"method":"sub.tickers", "param":{}, "gzip": False}
+                sub = {"method": "sub.tickers", "param": {}, "gzip": False}
                 await ws.send(json.dumps(sub))
                 logging.info("SEND " + j(sub))
 
@@ -54,9 +62,10 @@ async def mexc_client():
                     while True:
                         await asyncio.sleep(PING_INTERVAL_SEC)
                         t0 = time.time()
-                        ping = {"method":"ping"}
+                        ping = {"method": "ping"}
                         await ws.send(json.dumps(ping))
                         logging.info(f"SEND {j(ping)} rtt=?")
+
                 ka_task = asyncio.create_task(keepalive())
 
                 # 受信ループ＋スタール監視
@@ -69,7 +78,9 @@ async def mexc_client():
                         if since > STALL_WARN_SEC:
                             logging.warning(f"STALL {since:.1f}s without messages")
                         if since > STALL_RESET_SEC:
-                            raise RuntimeError(f"No messages for {since:.1f}s -> reconnect")
+                            raise RuntimeError(
+                                f"No messages for {since:.1f}s -> reconnect"
+                            )
                         continue
 
                     now = time.monotonic()
@@ -78,7 +89,9 @@ async def mexc_client():
 
                     # テキスト/バイナリで分岐
                     if isinstance(msg, (bytes, bytearray)):
-                        logging.info(f"RECV BINARY len={len(msg)} bytes (unexpected with gzip:false)")
+                        logging.info(
+                            f"RECV BINARY len={len(msg)} bytes (unexpected with gzip:false)"
+                        )
                         continue
 
                     try:
@@ -93,9 +106,16 @@ async def mexc_client():
                         n = len(data.get("data", []))
                         ts = data.get("ts")
                         last_tickers_ts = ts
-                        logging.info(f"RECV push.tickers items={n} ts={ts} total_msgs={msg_count}")
-                    elif ch in ("pong", "rs.login", "rs.error",
-                                "rs.sub.tickers", "rs.unsub.tickers"):
+                        logging.info(
+                            f"RECV push.tickers items={n} ts={ts} total_msgs={msg_count}"
+                        )
+                    elif ch in (
+                        "pong",
+                        "rs.login",
+                        "rs.error",
+                        "rs.sub.tickers",
+                        "rs.unsub.tickers",
+                    ):
                         logging.info("RECV " + j(data))
                     else:
                         # その他のpublic pushなど
@@ -109,6 +129,7 @@ async def mexc_client():
             logging.info(f"RECONNECT in {backoff}s")
             await asyncio.sleep(backoff)
             continue
+
 
 if __name__ == "__main__":
     asyncio.run(mexc_client())

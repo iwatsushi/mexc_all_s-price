@@ -68,7 +68,7 @@ class TradeMini:
             "trades_executed": 0,
             "uptime": 0.0,
         }
-        
+
         # 変動率統計（非同期収集）
         self.price_changes = {
             "max_change": 0.0,
@@ -82,11 +82,13 @@ class TradeMini:
         self.stats_timer = None
 
         # 🛡️ パターンB': バッチ処理制御（WebSocket受信を最優先保護）
-        self.batch_processing_semaphore = asyncio.Semaphore(2)  # バッチ処理の同時実行制限
-        
+        self.batch_processing_semaphore = asyncio.Semaphore(
+            2
+        )  # バッチ処理の同時実行制限
+
         # 📊 価格履歴管理（10秒前比較用） - symbol -> deque([(timestamp_sec, price), ...])
         self.price_history = defaultdict(lambda: deque(maxlen=15))  # 約15秒分のバッファ
-        
+
         # 🎯 バッチ処理フラグ（重複バッチ処理の防止）
         self._batch_processing = False
 
@@ -205,16 +207,22 @@ class TradeMini:
         try:
             # 🚀 超高速処理：統計更新のみ（WebSocket受信を絶対保護）
             self.stats["ticks_processed"] += len(tickers)
-            logger.info(f"📥 Batch received: {len(tickers)} tickers, total processed: {self.stats['ticks_processed']}")
-            
+            logger.info(
+                f"📥 Batch received: {len(tickers)} tickers, total processed: {self.stats['ticks_processed']}"
+            )
+
             # 🎯 重複処理防止：既にバッチ処理中なら新しいタスクを作らない
             if self._batch_processing:
-                logger.info(f"⏸️ Batch processing in progress, skipping {len(tickers)} tickers")
+                logger.info(
+                    f"⏸️ Batch processing in progress, skipping {len(tickers)} tickers"
+                )
                 return
-                
+
             # 🛡️ 直接非同期処理を実行（asyncio.create_task()の問題を回避）
-            logger.info(f"🚀 Starting direct batch processing for {len(tickers)} tickers")
-            
+            logger.info(
+                f"🚀 Starting direct batch processing for {len(tickers)} tickers"
+            )
+
             # イベントループを取得して直接スケジュール
             try:
                 loop = asyncio.get_running_loop()
@@ -225,7 +233,7 @@ class TradeMini:
                 # フォールバック：同期処理でデータ保存のみ実行
                 logger.warning(f"🔄 Executing minimal sync processing as fallback")
                 self._minimal_sync_processing(tickers)
-            
+
         except Exception as e:
             # エラーログは出すが、WebSocket受信は継続
             logger.error(f"Error in batch reception: {e}")
@@ -235,46 +243,48 @@ class TradeMini:
         try:
             logger.info(f"🔧 Minimal sync processing for {len(tickers)} tickers")
             processed_count = 0
-            
+
             for ticker_data in tickers[:50]:  # 最初の50銘柄のみ処理（負荷軽減）
                 if not isinstance(ticker_data, dict):
                     continue
-                    
+
                 symbol = ticker_data.get("symbol", "")
                 price = float(ticker_data.get("lastPrice", 0))
-                
+
                 if not symbol or price <= 0:
                     continue
-                
+
                 # TickData作成とQuestDB保存のみ
                 tick = TickData(
                     symbol=symbol,
                     price=price,
                     timestamp=datetime.now(),
-                    volume=float(ticker_data.get("volume24", 0))
+                    volume=float(ticker_data.get("volume24", 0)),
                 )
-                
+
                 # データ管理に追加
                 self.data_manager.add_tick(tick)
-                
+
                 # QuestDB保存（同期）
                 self.questdb_client.save_tick_data(tick)
                 processed_count += 1
-            
-            logger.info(f"✅ Minimal sync processing completed: {processed_count} tickers")
-            
+
+            logger.info(
+                f"✅ Minimal sync processing completed: {processed_count} tickers"
+            )
+
         except Exception as e:
             logger.error(f"Error in minimal sync processing: {e}")
 
     async def _process_ticker_batch_controlled(self, tickers: list):
         """Semaphore制御付きバッチ処理（WebSocket受信保護）"""
         logger.info(f"🎯 Entering batch processing control for {len(tickers)} tickers")
-        
+
         # 🔍 監視：待機中のバッチ処理数をチェック
         waiting_batches = 2 - self.batch_processing_semaphore._value
         if waiting_batches > 0:
             logger.info(f"⏳ {waiting_batches}/2 batch tasks waiting")
-        
+
         logger.info(f"🔒 Acquiring batch processing semaphore...")
         async with self.batch_processing_semaphore:
             logger.info(f"✅ Semaphore acquired, starting batch processing")
@@ -291,48 +301,54 @@ class TradeMini:
             batch_start_time = time.time()
             batch_ts_sec = int(batch_start_time)
             trading_exchange = self.config.get("trading.exchange", "bybit")
-            
-            logger.info(f"🔄 Starting batch processing: {len(tickers)} tickers at {batch_ts_sec}")
-            
+
+            logger.info(
+                f"🔄 Starting batch processing: {len(tickers)} tickers at {batch_ts_sec}"
+            )
+
             # 📊 バッチ統計
             signals_in_batch = 0
             significant_changes = 0
             max_change = 0.0
             max_change_symbol = ""
-            
+
             # 🎯 Step 1: 軽量化処理（最初の100銘柄のみ - WebSocket保護最優先）
             processed_limit = min(100, len(tickers))  # 最大100銘柄まで
-            logger.info(f"⚡ Processing {processed_limit}/{len(tickers)} tickers (WebSocket protection)")
-            
+            logger.info(
+                f"⚡ Processing {processed_limit}/{len(tickers)} tickers (WebSocket protection)"
+            )
+
             for i, ticker_data in enumerate(tickers[:processed_limit]):
                 if not isinstance(ticker_data, dict):
                     continue
-                    
+
                 symbol = ticker_data.get("symbol", "")
                 price = float(ticker_data.get("lastPrice", 0))
-                
+
                 if not symbol or price <= 0:
                     continue
-                
+
                 # TickData作成とデータ管理
                 tick = TickData(
                     symbol=symbol,
                     price=price,
                     timestamp=datetime.now(),
-                    volume=float(ticker_data.get("volume24", 0))
+                    volume=float(ticker_data.get("volume24", 0)),
                 )
-                
+
                 # 🚀 軽量処理：データ管理のみ（戦略分析はスキップ）
                 self.data_manager.add_tick(tick)
-                
+
                 # 📈 価格履歴更新（軽量版）
-                price_change_percent = self._update_price_history_and_get_change(symbol, price, batch_ts_sec)
-                
+                price_change_percent = self._update_price_history_and_get_change(
+                    symbol, price, batch_ts_sec
+                )
+
                 # 🎯 軽量戦略分析（主要銘柄のみ、i < 20）
                 if i < 20 and trading_exchange == "bybit":
                     if self.symbol_mapper.is_tradeable_on_bybit(symbol):
                         signal = self.strategy.analyze_tick(tick)
-                        
+
                         # ⚡ シグナル処理（重要なもののみ）
                         if signal and signal.signal_type != SignalType.NONE:
                             signals_in_batch += 1
@@ -341,39 +357,43 @@ class TradeMini:
                                 f"🚨 SIGNAL: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f} "
                                 f"変動率: {price_change_percent:.3f}%"
                             )
-                
+
                 # 🔄 統計収集（ログ出力なし）
                 if abs(price_change_percent) > abs(max_change):
                     max_change = price_change_percent
                     max_change_symbol = symbol
-                    
+
                 if abs(price_change_percent) > 1.0:  # 1%以上の変動
                     significant_changes += 1
-                    
+
                 # ⚡ ポジション PnL 更新（既存ポジションがある場合のみ）
                 if symbol in self.position_manager.get_position_symbols():
                     self.position_manager.update_position_pnl(symbol, price)
-                
+
                 # 🔄 QuestDB保存（最初の50銘柄のみ - 軽量化）
                 if i < 50:
                     self.questdb_client.save_tick_data(tick)
-            
+
             # 📊 バッチ統計ログ（軽量版）
             logger.info(
                 f"📊 Lightweight Batch: {processed_limit}/{len(tickers)} processed, "
                 f"シグナル:{signals_in_batch}, 大変動:{significant_changes}, 最大変動:{max_change:.2f}%"
             )
-                
+
             # 🔄 変動率統計を非同期で更新（15秒ごと - 既存ロジック維持）
             if max_change != 0.0:
                 await self._update_price_change_stats(max_change_symbol, max_change)
-            
+
             # バッチ処理時間測定
             batch_duration = time.time() - batch_start_time
             current_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            logger.info(f"✅ [{current_time}] Batch processing completed in {batch_duration:.3f}s ({processed_limit}/{len(tickers)} tickers processed)")
-            logger.info(f"🔓 [{current_time}] Releasing semaphore, ready for next WebSocket message")
-            
+            logger.info(
+                f"✅ [{current_time}] Batch processing completed in {batch_duration:.3f}s ({processed_limit}/{len(tickers)} tickers processed)"
+            )
+            logger.info(
+                f"🔓 [{current_time}] Releasing semaphore, ready for next WebSocket message"
+            )
+
         except Exception as e:
             batch_duration = time.time() - batch_start_time
             logger.error(f"Error in batch processing after {batch_duration:.3f}s: {e}")
@@ -387,37 +407,39 @@ class TradeMini:
         except Exception as e:
             logger.error(f"Error in background QuestDB save for {tick.symbol}: {e}")
 
-    def _update_price_history_and_get_change(self, symbol: str, price: float, timestamp_sec: int) -> float:
+    def _update_price_history_and_get_change(
+        self, symbol: str, price: float, timestamp_sec: int
+    ) -> float:
         """価格履歴を更新し10秒前との変動率を計算（バッチ処理用高速版）"""
         try:
             # 🚀 履歴更新（deque操作は高速）
             self.price_history[symbol].append((timestamp_sec, price))
-            
+
             # 🔍 10秒前の価格を検索（後ろから前へ効率的に検索）
             target_sec = timestamp_sec - 10
             prev_price = None
-            
+
             # dequeを後ろから検索して target_sec 以下の最新価格を取得
             for ts, px in reversed(self.price_history[symbol]):
                 if ts <= target_sec:
                     prev_price = px
                     break
-            
+
             # 📊 変動率計算
             if prev_price and prev_price > 0:
                 change_percent = ((price - prev_price) / prev_price) * 100
                 return change_percent
-            
+
             return 0.0
-            
+
         except Exception:
             return 0.0
-    
+
     def _get_price_change_from_strategy(self, symbol: str) -> float:
         """戦略から価格変動率を取得（互換性維持）"""
         try:
             # 戦略から最新の価格変動率を取得
-            if hasattr(self.strategy, 'get_price_change_percent'):
+            if hasattr(self.strategy, "get_price_change_percent"):
                 return self.strategy.get_price_change_percent(symbol)
             return 0.0
         except Exception:
@@ -427,15 +449,17 @@ class TradeMini:
         """変動率統計を非同期で更新"""
         try:
             abs_change = abs(change_percent)
-            
+
             # 最大変動率の更新
             if abs_change > abs(self.price_changes["max_change"]):
                 self.price_changes["max_change"] = change_percent
                 self.price_changes["max_change_symbol"] = symbol
-                self.price_changes["max_change_direction"] = "上昇" if change_percent > 0 else "下落"
-            
+                self.price_changes["max_change_direction"] = (
+                    "上昇" if change_percent > 0 else "下落"
+                )
+
             self.price_changes["changes_since_last_report"] += 1
-            
+
             # 15秒ごとに最大変動率をレポート（デバッグ用に短縮）
             now = datetime.now()
             if (now - self.price_changes["last_report_time"]).total_seconds() >= 15:
@@ -445,14 +469,14 @@ class TradeMini:
                         f"{self.price_changes['max_change']:.3f}% ({self.price_changes['max_change_direction']}) "
                         f"- {self.price_changes['changes_since_last_report']}銘柄分析済み"
                     )
-                
+
                 # 統計リセット
                 self.price_changes["max_change"] = 0.0
                 self.price_changes["max_change_symbol"] = ""
                 self.price_changes["max_change_direction"] = ""
                 self.price_changes["last_report_time"] = now
                 self.price_changes["changes_since_last_report"] = 0
-                
+
         except Exception as e:
             logger.error(f"Error updating price change stats: {e}")
 
@@ -512,7 +536,9 @@ class TradeMini:
         """決済シグナル処理"""
         symbol = signal.symbol
 
-        logger.info(f"🔄 EXIT処理開始: {symbol} @ {signal.price:.6f} - 理由: {signal.reason}")
+        logger.info(
+            f"🔄 EXIT処理開始: {symbol} @ {signal.price:.6f} - 理由: {signal.reason}"
+        )
 
         # ポジション決済
         success, message, position = self.position_manager.close_position(
@@ -523,7 +549,7 @@ class TradeMini:
             # PnL計算
             realized_pnl = position.unrealized_pnl
             pnl_percent = (realized_pnl / (position.entry_price * position.size)) * 100
-            
+
             logger.info(
                 f"✅ EXIT成功: {symbol} {position.side} @ {signal.price:.6f} "
                 f"PnL: {realized_pnl:.2f} USDT ({pnl_percent:.2f}%)"

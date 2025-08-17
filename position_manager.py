@@ -9,9 +9,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
+from bybit_client import BybitClient, BybitOrderResult
 from config import Config
 from mexc_client import MEXCClient, OrderResult
-from bybit_client import BybitClient, BybitOrderResult
 from symbol_mapper import SymbolMapper
 
 logger = logging.getLogger(__name__)
@@ -66,14 +66,22 @@ class Position:
 class PositionManager:
     """ポジション管理クラス"""
 
-    def __init__(self, config: Config, mexc_client: MEXCClient, bybit_client: BybitClient, symbol_mapper: SymbolMapper):
+    def __init__(
+        self,
+        config: Config,
+        mexc_client: MEXCClient,
+        bybit_client: BybitClient,
+        symbol_mapper: SymbolMapper,
+    ):
         self.config = config
         self.mexc_client = mexc_client
         self.bybit_client = bybit_client
         self.symbol_mapper = symbol_mapper
-        
+
         # 取引所設定（将来のMEXC対応のため）
-        self.trading_exchange = config.get("trading.exchange", "bybit")  # "mexc" or "bybit"
+        self.trading_exchange = config.get(
+            "trading.exchange", "bybit"
+        )  # "mexc" or "bybit"
 
         # 設定パラメータ
         self.max_concurrent_positions = config.max_concurrent_positions
@@ -115,11 +123,11 @@ class PositionManager:
         try:
             if self.trading_exchange == "bybit":
                 balance_response = self.bybit_client.get_wallet_balance()
-                
+
                 if balance_response.get("retCode") == 0:
                     result = balance_response.get("result", {})
                     accounts = result.get("list", [])
-                    
+
                     for account in accounts:
                         coins = account.get("coin", [])
                         for coin in coins:
@@ -127,23 +135,27 @@ class PositionManager:
                                 # 安全な数値変換（空文字列対応）
                                 wallet_balance = coin.get("walletBalance", "0")
                                 available_balance = coin.get("availableToWithdraw", "0")
-                                
+
                                 # 空文字列または None の場合は 0 として扱う
                                 if not wallet_balance or wallet_balance == "":
                                     wallet_balance = "0"
                                 if not available_balance or available_balance == "":
                                     available_balance = "0"
-                                
+
                                 self.account_balance = float(wallet_balance)
                                 self.available_balance = float(available_balance)
                                 break
                         if self.account_balance > 0:
                             break
-                    
-                    logger.info(f"Bybit account balance updated: {self.account_balance} USDT")
+
+                    logger.info(
+                        f"Bybit account balance updated: {self.account_balance} USDT"
+                    )
                 else:
-                    logger.error(f"Failed to get Bybit balance: {balance_response.get('retMsg')}")
-            
+                    logger.error(
+                        f"Failed to get Bybit balance: {balance_response.get('retMsg')}"
+                    )
+
             else:  # MEXC
                 balance_response = self.mexc_client.get_balance()
 
@@ -153,16 +165,18 @@ class PositionManager:
                         if asset.get("currency") == "USDT":
                             # 安全な数値変換（空文字列対応）
                             available_balance = asset.get("availableBalance", "0")
-                            
+
                             # 空文字列または None の場合は 0 として扱う
                             if not available_balance or available_balance == "":
                                 available_balance = "0"
-                            
+
                             self.account_balance = float(available_balance)
                             self.available_balance = float(available_balance)
                             break
 
-                    logger.info(f"MEXC account balance updated: {self.account_balance} USDT")
+                    logger.info(
+                        f"MEXC account balance updated: {self.account_balance} USDT"
+                    )
                 else:
                     logger.error(
                         f"Failed to get MEXC balance: {balance_response.get('message')}"
@@ -310,28 +324,34 @@ class PositionManager:
 
             # マージンモード設定とレバレッジ設定
             margin_mode = self._determine_margin_mode()
-            
+
             if self.trading_exchange == "bybit":
                 # Bybitでレバレッジ設定
                 leverage_success = self.bybit_client.set_leverage(symbol, leverage)
                 if leverage_success:
                     self.stats["margin_mode_switches"] += 1
                     logger.info(f"Set leverage for {symbol} to {leverage}x on Bybit")
-                
+
                 # 注文実行（Bybit）
-                order_result = self.bybit_client.place_market_order(symbol, side, position_size)
+                order_result = self.bybit_client.place_market_order(
+                    symbol, side, position_size
+                )
                 order_success = order_result.success
                 order_id = order_result.order_id
                 order_message = order_result.message
             else:
                 # MEXC
-                margin_success = self.mexc_client.set_margin_mode(symbol, margin_mode.value)
+                margin_success = self.mexc_client.set_margin_mode(
+                    symbol, margin_mode.value
+                )
                 if margin_success:
                     self.stats["margin_mode_switches"] += 1
                     logger.info(f"Set margin mode for {symbol} to {margin_mode.value}")
-                
+
                 # 注文実行（MEXC）
-                mexc_order_result = self.mexc_client.place_market_order(symbol, side, position_size)
+                mexc_order_result = self.mexc_client.place_market_order(
+                    symbol, side, position_size
+                )
                 order_success = mexc_order_result.success
                 order_id = mexc_order_result.order_id
                 order_message = mexc_order_result.message
@@ -364,9 +384,7 @@ class PositionManager:
 
             else:
                 self.stats["failed_orders"] += 1
-                logger.error(
-                    f"Failed to open position for {symbol}: {order_message}"
-                )
+                logger.error(f"Failed to open position for {symbol}: {order_message}")
                 return False, f"Order failed: {order_message}", None
 
     def close_position(
@@ -392,14 +410,16 @@ class PositionManager:
 
             # 決済注文実行
             position.status = PositionStatus.CLOSING
-            
+
             if self.trading_exchange == "bybit":
                 order_result = self.bybit_client.close_position(symbol, position.side)
                 order_success = order_result.success
                 order_id = order_result.order_id
                 order_message = order_result.message
             else:
-                mexc_order_result = self.mexc_client.close_position(symbol, position.side)
+                mexc_order_result = self.mexc_client.close_position(
+                    symbol, position.side
+                )
                 order_success = mexc_order_result.success
                 order_id = mexc_order_result.order_id
                 order_message = mexc_order_result.message
@@ -426,9 +446,7 @@ class PositionManager:
             else:
                 position.status = PositionStatus.ERROR
                 self.stats["failed_orders"] += 1
-                logger.error(
-                    f"Failed to close position for {symbol}: {order_message}"
-                )
+                logger.error(f"Failed to close position for {symbol}: {order_message}")
                 return False, f"Close order failed: {order_message}", position
 
     def update_position_pnl(self, symbol: str, current_price: float):

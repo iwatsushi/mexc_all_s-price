@@ -66,12 +66,12 @@ class Config:
         env_setting = os.getenv("BYBIT_ENVIRONMENT")
         if env_setting:
             return env_setting.lower()
-        
+
         # 後方互換性のため旧設定も確認
         env_testnet = os.getenv("BYBIT_TESTNET")
         if env_testnet is not None:
             return "testnet" if env_testnet.lower() == "true" else "demo"
-        
+
         # config.ymlの設定を確認
         return self.get("bybit.environment", "demo")
 
@@ -102,7 +102,7 @@ class Config:
         else:
             # デフォルトはデモ
             return os.getenv("BYBIT_API_SECRET_DEMO", "")
-        
+
     @property
     def bybit_testnet(self) -> bool:
         """Bybit Testnet使用フラグ（後方互換性のため残存）"""

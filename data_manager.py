@@ -133,7 +133,9 @@ class SymbolTickData:
 
             past_price = self.get_price_n_seconds_ago(n_seconds)
             if past_price is None or past_price == 0:
-                logger.debug(f"{self.symbol}: No past price for {n_seconds}s ago (data count: {len(self.tick_data)})")
+                logger.debug(
+                    f"{self.symbol}: No past price for {n_seconds}s ago (data count: {len(self.tick_data)})"
+                )
                 return None
 
             current_price = self.latest_tick.price
@@ -141,7 +143,9 @@ class SymbolTickData:
 
             # デバッグ情報（変動率が0でない場合のみ）
             if abs(change_percent) > 0.001:
-                logger.debug(f"{self.symbol}: {change_percent:.3f}% change ({current_price:.6f} vs {past_price:.6f})")
+                logger.debug(
+                    f"{self.symbol}: {change_percent:.3f}% change ({current_price:.6f} vs {past_price:.6f})"
+                )
 
             return change_percent
 

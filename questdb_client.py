@@ -88,7 +88,7 @@ class QuestDBClient:
         """QuestDB接続テスト（リトライ機能付き）"""
         max_retries = 5
         retry_delay = 2
-        
+
         for attempt in range(max_retries):
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -97,24 +97,34 @@ class QuestDBClient:
                 sock.close()
 
                 if result == 0:
-                    logger.info(f"QuestDB connection test successful (attempt {attempt + 1})")
+                    logger.info(
+                        f"QuestDB connection test successful (attempt {attempt + 1})"
+                    )
                     return True
                 else:
                     if attempt < max_retries - 1:
-                        logger.debug(f"QuestDB connection attempt {attempt + 1} failed: {result}, retrying in {retry_delay}s...")
+                        logger.debug(
+                            f"QuestDB connection attempt {attempt + 1} failed: {result}, retrying in {retry_delay}s..."
+                        )
                         time.sleep(retry_delay)
                     else:
-                        logger.warning(f"QuestDB connection test failed after {max_retries} attempts: {result}")
+                        logger.warning(
+                            f"QuestDB connection test failed after {max_retries} attempts: {result}"
+                        )
                         return False
 
             except Exception as e:
                 if attempt < max_retries - 1:
-                    logger.debug(f"QuestDB connection attempt {attempt + 1} error: {e}, retrying in {retry_delay}s...")
+                    logger.debug(
+                        f"QuestDB connection attempt {attempt + 1} error: {e}, retrying in {retry_delay}s..."
+                    )
                     time.sleep(retry_delay)
                 else:
-                    logger.warning(f"QuestDB connection test error after {max_retries} attempts: {e}")
+                    logger.warning(
+                        f"QuestDB connection test error after {max_retries} attempts: {e}"
+                    )
                     return False
-        
+
         return False
 
     def _start_workers(self):
@@ -135,7 +145,7 @@ class QuestDBClient:
         """ILPデータをQuestDBに送信（リトライ機能付き）"""
         max_retries = 3
         retry_delay = 1
-        
+
         for attempt in range(max_retries):
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -143,13 +153,15 @@ class QuestDBClient:
                 sock.connect((self.host, self.ilp_port))
                 sock.sendall(data.encode("utf-8"))
                 sock.close()
-                
+
                 # 成功時はエラーカウントをリセット
                 with self._lock:
                     if self.stats["write_errors"] > 0:
-                        logger.info(f"QuestDB ILP connection restored after {self.stats['write_errors']} errors")
+                        logger.info(
+                            f"QuestDB ILP connection restored after {self.stats['write_errors']} errors"
+                        )
                         self.stats["write_errors"] = 0
-                
+
                 return True
 
             except Exception as e:
@@ -160,9 +172,11 @@ class QuestDBClient:
                     with self._lock:
                         self.stats["write_errors"] += 1
                         if self.stats["write_errors"] % 10 == 1:
-                            logger.warning(f"QuestDB ILP connection failed after {max_retries} retries (error #{self.stats['write_errors']}): {e}")
+                            logger.warning(
+                                f"QuestDB ILP connection failed after {max_retries} retries (error #{self.stats['write_errors']}): {e}"
+                            )
                     return False
-        
+
         return False
 
     def _tick_worker(self):
