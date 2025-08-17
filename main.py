@@ -203,36 +203,25 @@ class TradeMini:
             raise
 
     def _on_ticker_batch_received(self, tickers: list):
-        """ティッカーバッチ受信時のコールバック（パターンB' - WebSocket保護最優先）"""
+        """ティッカーバッチ受信時のコールバック（超軽量版 - WebSocket絶対保護）"""
         try:
-            # 🚀 超高速処理：統計更新のみ（WebSocket受信を絶対保護）
+            # 🚀 最小限統計更新のみ（1ms以下で完了）
             self.stats["ticks_processed"] += len(tickers)
-            logger.info(
-                f"📥 Batch received: {len(tickers)} tickers, total processed: {self.stats['ticks_processed']}"
-            )
+            current_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            logger.info(f"📥 [{current_time}] Batch: {len(tickers)} tickers, total: {self.stats['ticks_processed']}")
 
-            # 🎯 重複処理防止：既にバッチ処理中なら新しいタスクを作らない
-            if self._batch_processing:
-                logger.info(
-                    f"⏸️ Batch processing in progress, skipping {len(tickers)} tickers"
-                )
-                return
+            # 🎯 超軽量処理：最初の10銘柄のみ価格履歴更新（WebSocket保護最優先）
+            batch_ts_sec = int(time.time())
+            for ticker_data in tickers[:10]:  # わずか10銘柄のみ
+                if isinstance(ticker_data, dict):
+                    symbol = ticker_data.get("symbol", "")
+                    price = float(ticker_data.get("lastPrice", 0))
+                    if symbol and price > 0:
+                        # 価格履歴のみ更新（超高速）
+                        self.price_history[symbol].append((batch_ts_sec, price))
 
-            # 🛡️ 直接非同期処理を実行（asyncio.create_task()の問題を回避）
-            logger.info(
-                f"🚀 Starting direct batch processing for {len(tickers)} tickers"
-            )
-
-            # イベントループを取得して直接スケジュール
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self._process_ticker_batch_controlled(tickers))
-                logger.info(f"✅ Batch processing task scheduled successfully")
-            except RuntimeError as e:
-                logger.error(f"❌ Failed to schedule batch task: {e}")
-                # フォールバック：同期処理でデータ保存のみ実行
-                logger.warning(f"🔄 Executing minimal sync processing as fallback")
-                self._minimal_sync_processing(tickers)
+            # 🔄 非同期処理は完全にスキップ（WebSocket受信を絶対保護）
+            logger.info(f"✅ [{current_time}] Minimal processing completed, WebSocket ready for next message")
 
         except Exception as e:
             # エラーログは出すが、WebSocket受信は継続
