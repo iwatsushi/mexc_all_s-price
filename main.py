@@ -85,6 +85,7 @@ class TradeMini:
         # 🛡️ 真のマルチプロセス分離設計
         self.data_queue = multiprocessing.Queue(maxsize=10)  # プロセス間通信キュー
         self.processing_active = multiprocessing.Value('b', True)  # プロセス間共有フラグ
+        self.worker_heartbeat = multiprocessing.Value('d', time.time())  # ワーカーハートビート
         self.data_processor = None  # データ処理プロセス
 
         # 📊 価格履歴管理（10秒前比較用） - symbol -> deque([(timestamp_sec, price), ...])
@@ -240,14 +241,14 @@ class TradeMini:
         # 独立プロセスでデータ処理を実行
         self.data_processor = multiprocessing.Process(
             target=self._multiprocess_data_worker,
-            args=(self.data_queue, self.processing_active),
+            args=(self.data_queue, self.processing_active, self.worker_heartbeat),
             daemon=True
         )
         self.data_processor.start()
         logger.info(f"✅ Multi-process data worker started with PID: {self.data_processor.pid}")
 
     @staticmethod
-    def _multiprocess_data_worker(data_queue: multiprocessing.Queue, processing_active: multiprocessing.Value):
+    def _multiprocess_data_worker(data_queue: multiprocessing.Queue, processing_active: multiprocessing.Value, worker_heartbeat: multiprocessing.Value):
         """独立プロセスでのデータ処理（GIL完全回避）"""
         import time
         from datetime import datetime
@@ -258,8 +259,17 @@ class TradeMini:
         
         logger.info(f"🔄 Multi-process data worker started in PID: {multiprocessing.current_process().pid}")
         
+        last_heartbeat = time.time()
+        
         while processing_active.value:
             try:
+                # 🩸 ハートビート更新（5秒毎）
+                current_time = time.time()
+                if current_time - last_heartbeat >= 5.0:
+                    worker_heartbeat.value = current_time
+                    last_heartbeat = current_time
+                    logger.debug(f"💓 Worker heartbeat: {datetime.fromtimestamp(current_time).strftime('%H:%M:%S')}")
+                
                 # キューからデータを取得（タイムアウト付き）
                 try:
                     batch_data = data_queue.get(timeout=1.0)
@@ -273,11 +283,72 @@ class TradeMini:
                 # 🚀 高速処理（JSONからQuestDB形式への直接変換）
                 TradeMini._process_batch_lightning_fast(tickers, batch_timestamp, batch_id)
                 
+                # 処理後にもハートビート更新
+                worker_heartbeat.value = time.time()
+                
             except Exception as e:
                 logger.error(f"Error in multi-process data worker: {e}")
                 time.sleep(0.1)  # エラー時は短時間待機
         
         logger.info("Multi-process data worker shutdown completed")
+
+    def _check_multiprocess_health(self):
+        """マルチプロセスワーカーのヘルスチェック"""
+        try:
+            current_time = time.time()
+            
+            # ワーカープロセスの生存確認
+            if self.data_processor and not self.data_processor.is_alive():
+                logger.error("🚨 Multi-process data worker is dead! Attempting restart...")
+                self._restart_multiprocess_worker()
+                return
+            
+            # ハートビートチェック
+            last_heartbeat = self.worker_heartbeat.value
+            heartbeat_age = current_time - last_heartbeat
+            
+            if heartbeat_age > 30.0:  # 30秒以上ハートビートがない
+                logger.warning(f"⚠️ Worker heartbeat stale: {heartbeat_age:.1f}s ago")
+                if heartbeat_age > 60.0:  # 1分以上なら強制再起動
+                    logger.error("🚨 Worker heartbeat timeout! Restarting worker...")
+                    self._restart_multiprocess_worker()
+                    return
+            
+            # キューサイズ監視
+            queue_size = self.data_queue.qsize()
+            if queue_size >= 8:  # キューが詰まっている
+                logger.warning(f"⚠️ Data queue congestion: {queue_size}/10 items")
+            
+            # 正常時のヘルスレポート
+            worker_pid = self.data_processor.pid if self.data_processor else "None"
+            logger.debug(f"💪 Health check OK - Worker PID: {worker_pid}, Queue: {queue_size}/10, Heartbeat: {heartbeat_age:.1f}s ago")
+            
+        except Exception as e:
+            logger.error(f"Error in health check: {e}")
+
+    def _restart_multiprocess_worker(self):
+        """マルチプロセスワーカーを再起動"""
+        try:
+            logger.info("🔄 Restarting multi-process data worker...")
+            
+            # 古いプロセスを停止
+            if self.data_processor:
+                self.processing_active.value = False
+                self.data_processor.terminate()
+                self.data_processor.join(timeout=5)
+                if self.data_processor.is_alive():
+                    logger.warning("Force killing stuck worker process")
+                    self.data_processor.kill()
+            
+            # 新しいプロセスを開始
+            self.processing_active.value = True
+            self.worker_heartbeat.value = time.time()
+            self._start_multiprocess_data_worker()
+            
+            logger.info("✅ Multi-process worker restart completed")
+            
+        except Exception as e:
+            logger.error(f"Failed to restart multi-process worker: {e}")
 
     @staticmethod
     def _process_batch_lightning_fast(tickers: list, batch_timestamp: float, batch_id: int):
@@ -758,9 +829,16 @@ class TradeMini:
             logger.info("Trade Mini is running. Press Ctrl+C to stop.")
 
             # メインループ
+            last_health_check = time.time()
             while self.running and not self.shutdown_event.is_set():
                 try:
                     await asyncio.sleep(1.0)
+
+                    # 🩺 プロセスヘルスチェック（30秒毎）
+                    current_time = time.time()
+                    if current_time - last_health_check >= 30.0:
+                        self._check_multiprocess_health()
+                        last_health_check = current_time
 
                     # 定期的なクリーンアップ
                     if int(time.time()) % 300 == 0:  # 5分毎
