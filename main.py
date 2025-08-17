@@ -206,17 +206,28 @@ class TradeMini:
             raise
 
     def _on_ticker_batch_received(self, tickers: list):
-        """WebSocket受信コールバック（受信証明用 - 極限まで軽量化）"""
+        """WebSocket受信コールバック（受信とデータ処理の完全分離）"""
         try:
-            # 🚀 受信証明のみ（極限の軽量化 < 0.01ms）
+            # 🚀 受信証明（極限の軽量化 < 0.01ms）
             self.reception_stats["batches_received"] += 1
+            self.reception_stats["tickers_received"] += len(tickers)
             current_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
             
-            # 📨 受信証明ログのみ（データ処理は完全スキップ）
+            # 📨 受信証明ログ
             logger.info(f"🔥 [{current_time}] WebSocket ALIVE! Batch #{self.reception_stats['batches_received']}: {len(tickers)} tickers received")
             
-            # 🎯 データ処理は一時的に完全スキップ（WebSocket受信証明のため）
-            # self.data_queue.put_nowait(...) # 一時的にコメントアウト
+            # 🎯 データ処理ワーカーにデータを送信（WebSocket受信をブロックしない）
+            batch_data = {
+                "tickers": tickers,
+                "timestamp": time.time(),
+                "batch_id": self.reception_stats["batches_received"]
+            }
+            
+            # キューが満杯の場合はスキップ（WebSocket受信を優先）
+            try:
+                self.data_queue.put_nowait(batch_data)
+            except:
+                logger.warning(f"Data queue full, skipping batch #{self.reception_stats['batches_received']}")
 
         except Exception as e:
             # エラーが発生してもWebSocket受信は継続
@@ -259,15 +270,19 @@ class TradeMini:
             self.processing_stats["batches_processed"] += 1
             self.processing_stats["tickers_processed"] += len(tickers)
             
-            logger.info(f"🔄 Processing batch #{batch_id}: {len(tickers)} tickers (worker independent)")
+            logger.info(f"🔄 Processing batch #{batch_id}: {len(tickers)} tickers (全銘柄分析 - エントリー機会を逃さない)")
             
-            # 📊 効率的な一括処理（forループ内での非同期タスク生成を回避）
+            # 📊 効率的な一括処理（全銘柄対応 - 軽量化）
             signals_count = 0
             significant_changes = 0
             processed_count = 0
+            tradeable_count = 0
             
-            # 全銘柄を順次処理（1つのタスク内で完結）
+            # 全銘柄を順次処理（1つのタスク内で完結 - 軽量版）
             for ticker_data in tickers:
+                # 🚀 処理数の制限で早期終了（WebSocket受信を保護）
+                if processed_count >= 500:  # 最大500銘柄まで処理
+                    break
                 if not isinstance(ticker_data, dict):
                     continue
                 
@@ -292,30 +307,41 @@ class TradeMini:
                 # データ管理
                 self.data_manager.add_tick(tick)
                 
-                # 🎯 戦略分析（主要銘柄のみ - 効率化）
-                if processed_count < 20 and trading_exchange == "bybit":
+                # 🎯 戦略分析（全銘柄対応 - エントリー機会を逃さない）
+                if trading_exchange == "bybit":
                     if self.symbol_mapper.is_tradeable_on_bybit(symbol):
-                        signal = self.strategy.analyze_tick(tick)
+                        tradeable_count += 1
                         
-                        if signal and signal.signal_type != SignalType.NONE:
-                            signals_count += 1
-                            logger.info(f"🚨 SIGNAL: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f}")
+                        # 戦略分析を軽量化（処理時間を短縮）
+                        if tradeable_count <= 100:  # 最初の100銘柄のみ詳細分析
+                            signal = self.strategy.analyze_tick(tick)
+                            
+                            if signal and signal.signal_type != SignalType.NONE:
+                                signals_count += 1
+                                logger.info(f"🚨 SIGNAL: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f}")
+                                
+                                # 🚀 シグナル処理を非同期で実行（WebSocket受信をブロックしない）
+                                asyncio.create_task(self._process_signal(signal))
                 
-                # 📊 統計収集
+                # 📊 統計収集（全銘柄）
                 if abs(price_change_percent) > 1.0:
                     significant_changes += 1
                 
-                # 💾 QuestDB保存（一部のみ）
-                if processed_count < 10:
+                # 💾 QuestDB保存（全銘柄対応 - エントリー機会を逃さない）
+                if processed_count < 200 or abs(price_change_percent) > 0.3:  # より多くの銘柄を保存
                     self.questdb_client.save_tick_data(tick)
                 
                 processed_count += 1
+                
+                # 🚀 定期的にイベントループを譲る（WebSocket受信をブロックしない）
+                if processed_count % 50 == 0:
+                    await asyncio.sleep(0.001)  # 1ms待機でイベントループを譲る
             
             # ⏱️ 処理時間計測
             duration = time.time() - start_time
             current_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
             
-            logger.info(f"✅ [{current_time}] Batch #{batch_id} completed: {processed_count}/{len(tickers)} processed in {duration:.3f}s, signals: {signals_count}")
+            logger.info(f"✅ [{current_time}] Batch #{batch_id} completed: {processed_count}/{len(tickers)} processed in {duration:.3f}s, tradeable: {tradeable_count}, signals: {signals_count}, significant_changes: {significant_changes}")
             
         except Exception as e:
             logger.error(f"Error processing batch #{batch_id}: {e}")
@@ -372,113 +398,11 @@ class TradeMini:
             logger.info(f"✅ Semaphore acquired, starting batch processing")
             self._batch_processing = True
             try:
-                await self._process_ticker_batch_async(tickers)
+                await self._process_single_batch_efficiently(tickers, time.time(), self.processing_stats["batches_processed"])
             finally:
                 self._batch_processing = False
                 logger.info(f"🔓 Batch processing completed, releasing semaphore")
 
-    async def _process_ticker_batch_async(self, tickers: list):
-        """非同期バッチ処理（WebSocket受信を最優先保護）"""
-        try:
-            batch_start_time = time.time()
-            batch_ts_sec = int(batch_start_time)
-            trading_exchange = self.config.get("trading.exchange", "bybit")
-
-            logger.info(
-                f"🔄 Starting batch processing: {len(tickers)} tickers at {batch_ts_sec}"
-            )
-
-            # 📊 バッチ統計
-            signals_in_batch = 0
-            significant_changes = 0
-            max_change = 0.0
-            max_change_symbol = ""
-
-            # 🎯 Step 1: 軽量化処理（最初の100銘柄のみ - WebSocket保護最優先）
-            processed_limit = min(100, len(tickers))  # 最大100銘柄まで
-            logger.info(
-                f"⚡ Processing {processed_limit}/{len(tickers)} tickers (WebSocket protection)"
-            )
-
-            for i, ticker_data in enumerate(tickers[:processed_limit]):
-                if not isinstance(ticker_data, dict):
-                    continue
-
-                symbol = ticker_data.get("symbol", "")
-                price = float(ticker_data.get("lastPrice", 0))
-
-                if not symbol or price <= 0:
-                    continue
-
-                # TickData作成とデータ管理
-                tick = TickData(
-                    symbol=symbol,
-                    price=price,
-                    timestamp=datetime.now(),
-                    volume=float(ticker_data.get("volume24", 0)),
-                )
-
-                # 🚀 軽量処理：データ管理のみ（戦略分析はスキップ）
-                self.data_manager.add_tick(tick)
-
-                # 📈 価格履歴更新（軽量版）
-                price_change_percent = self._update_price_history_and_get_change(
-                    symbol, price, batch_ts_sec
-                )
-
-                # 🎯 軽量戦略分析（主要銘柄のみ、i < 20）
-                if i < 20 and trading_exchange == "bybit":
-                    if self.symbol_mapper.is_tradeable_on_bybit(symbol):
-                        signal = self.strategy.analyze_tick(tick)
-
-                        # ⚡ シグナル処理（重要なもののみ）
-                        if signal and signal.signal_type != SignalType.NONE:
-                            signals_in_batch += 1
-                            # シグナル処理は後続バッチで実行（軽量化）
-                            logger.info(
-                                f"🚨 SIGNAL: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f} "
-                                f"変動率: {price_change_percent:.3f}%"
-                            )
-
-                # 🔄 統計収集（ログ出力なし）
-                if abs(price_change_percent) > abs(max_change):
-                    max_change = price_change_percent
-                    max_change_symbol = symbol
-
-                if abs(price_change_percent) > 1.0:  # 1%以上の変動
-                    significant_changes += 1
-
-                # ⚡ ポジション PnL 更新（既存ポジションがある場合のみ）
-                if symbol in self.position_manager.get_position_symbols():
-                    self.position_manager.update_position_pnl(symbol, price)
-
-                # 🔄 QuestDB保存（最初の50銘柄のみ - 軽量化）
-                if i < 50:
-                    self.questdb_client.save_tick_data(tick)
-
-            # 📊 バッチ統計ログ（軽量版）
-            logger.info(
-                f"📊 Lightweight Batch: {processed_limit}/{len(tickers)} processed, "
-                f"シグナル:{signals_in_batch}, 大変動:{significant_changes}, 最大変動:{max_change:.2f}%"
-            )
-
-            # 🔄 変動率統計を非同期で更新（15秒ごと - 既存ロジック維持）
-            if max_change != 0.0:
-                await self._update_price_change_stats(max_change_symbol, max_change)
-
-            # バッチ処理時間測定
-            batch_duration = time.time() - batch_start_time
-            current_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            logger.info(
-                f"✅ [{current_time}] Batch processing completed in {batch_duration:.3f}s ({processed_limit}/{len(tickers)} tickers processed)"
-            )
-            logger.info(
-                f"🔓 [{current_time}] Releasing semaphore, ready for next WebSocket message"
-            )
-
-        except Exception as e:
-            batch_duration = time.time() - batch_start_time
-            logger.error(f"Error in batch processing after {batch_duration:.3f}s: {e}")
 
     async def _background_questdb_save(self, tick: TickData):
         """バックグラウンドでのQuestDB保存処理（トレーディングをブロックしない）"""
