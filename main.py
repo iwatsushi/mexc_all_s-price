@@ -315,24 +315,10 @@ class TradeMini:
                     except (ValueError, TypeError):
                         continue
             
-            # 🚀 QuestDB一括書き込み（Socket vs Sender性能比較）
+            # 🚀 QuestDB一括書き込み（超高速実装）
             questdb_saved = 0
             if questdb_lines:
-                # Socket方式の性能測定
-                socket_start = time.time()
-                questdb_saved_socket = TradeMini._send_to_questdb_lightning(questdb_lines)
-                socket_duration = time.time() - socket_start
-                
-                # Sender方式の性能測定
-                sender_start = time.time()
-                questdb_saved_sender = TradeMini._send_to_questdb_sender(questdb_lines)
-                sender_duration = time.time() - sender_start
-                
-                questdb_saved = max(questdb_saved_socket, questdb_saved_sender)
-                
-                # 性能比較ログ
-                from loguru import logger
-                logger.info(f"🏁 Performance comparison - Socket: {socket_duration:.3f}s ({questdb_saved_socket} records), Sender: {sender_duration:.3f}s ({questdb_saved_sender} records)")
+                questdb_saved = TradeMini._send_to_questdb_lightning(questdb_lines)
             
             duration = time.time() - start_time
             # printをloguruログに変更
@@ -368,68 +354,6 @@ class TradeMini:
             logger.warning(f"QuestDB write error: {e}")
             return 0
 
-    @staticmethod
-    def _send_to_questdb_sender(ilp_lines: list) -> int:
-        """QuestDB Senderで一括送信（性能比較用）"""
-        try:
-            # Senderライブラリをインポート
-            from questdb.ingress import Sender, TimestampNanos
-            import time
-            from loguru import logger
-            
-            start_time = time.time()
-            
-            # Sender接続を作成
-            with Sender.from_conf(f"tcp::addr=questdb:9009;tcp_keep_alive=true;") as sender:
-                # ILP行を解析してSender.row()形式に変換
-                for line in ilp_lines:
-                    try:
-                        # ILP行の解析: "tick_data,symbol=BTCUSDT price=50000.0,volume=100.0 1692123456789000000"
-                        if not line.strip():
-                            continue
-                            
-                        parts = line.strip().split(' ')
-                        if len(parts) != 3:
-                            continue
-                            
-                        table_symbols = parts[0]  # "tick_data,symbol=BTCUSDT"
-                        fields = parts[1]  # "price=50000.0,volume=100.0"
-                        timestamp_ns = int(parts[2])  # "1692123456789000000"
-                        
-                        # テーブル名とシンボルを分離
-                        table_part, symbol_part = table_symbols.split(',', 1)
-                        table_name = table_part
-                        symbol_key, symbol_value = symbol_part.split('=', 1)
-                        
-                        # フィールドを解析
-                        field_dict = {}
-                        for field in fields.split(','):
-                            key, value = field.split('=', 1)
-                            field_dict[key] = float(value)
-                        
-                        # Senderでデータ送信
-                        sender.row(
-                            table_name,
-                            symbols={symbol_key: symbol_value},
-                            columns=field_dict,
-                            at=TimestampNanos(timestamp_ns)
-                        )
-                        
-                    except Exception as parse_error:
-                        logger.warning(f"Failed to parse ILP line: {line} - {parse_error}")
-                        continue
-                
-                # フラッシュ
-                sender.flush()
-                
-                duration = time.time() - start_time
-                logger.debug(f"✅ QuestDB Sender: {len(ilp_lines)} records sent in {duration:.3f}s")
-                return len(ilp_lines)
-                
-        except Exception as e:
-            from loguru import logger
-            logger.warning(f"QuestDB Sender error: {e}")
-            return 0
 
     async def _process_single_batch_efficiently(self, tickers: list, batch_timestamp: float, batch_id: int):
         """1つのタスクで全銘柄を効率的に処理（GIL制約考慮）"""
