@@ -8,7 +8,6 @@ import hashlib
 import hmac
 import json
 import logging
-import multiprocessing
 import threading
 import time
 from dataclasses import dataclass
@@ -191,13 +190,8 @@ class MEXCWebSocketClient:
             # sub.tickersのみに集中（シンプル化）
             logger.info("Focusing on sub.tickers only for continuous data")
 
-            # ping定期送信用プロセスを開始
-            ping_process = multiprocessing.Process(
-                target=self._ping_worker_process, 
-                args=(self.ws_url, self.shutdown_event),
-                daemon=True
-            )
-            ping_process.start()
+            # ping定期送信用タスクを開始（軽量版）
+            ping_task = asyncio.create_task(self._send_periodic_ping(websocket))
 
             # メッセージ受信ループ（デバッグスクリプトと同じタイムアウト方式を採用）
             last_recv = time.monotonic()  # デバッグスクリプトと同じ単調時間を使用
@@ -265,10 +259,20 @@ class MEXCWebSocketClient:
 
                 except json.JSONDecodeError as e:
                     logger.warning(f"Non-JSON message received: {e}")
+                except websockets.exceptions.ConnectionClosed as e:
+                    logger.warning(f"WebSocket connection closed: {e}")
+                    # 接続切断は正常な再接続処理で対処
+                    break
                 except Exception as e:
                     logger.error(f"Error processing WebSocket message: {e}")
 
-            # ping専用プロセスは自動的に終了
+            # pingタスクをキャンセル
+            if "ping_task" in locals():
+                ping_task.cancel()
+                try:
+                    await ping_task
+                except asyncio.CancelledError:
+                    pass
 
     def _process_ticker_batch_safe(self, raw_message):
         """WebSocket受信を保護する超高速バッチティッカーデータ処理（生データ解凍統合版）"""
@@ -357,49 +361,37 @@ class MEXCWebSocketClient:
         # 新しい安全な処理に移譲
         self._process_ticker_data_safe(tickers)
 
-    @staticmethod
-    def _ping_worker_process(ws_url: str, shutdown_event):
-        """専用プロセスでping送信を実行（受信ループと完全分離）"""
-        async def ping_loop():
-            try:
-                while not shutdown_event.is_set():
-                    try:
-                        # 独立したWebSocket接続でping送信
-                        async with websockets.connect(
-                            ws_url,
-                            ping_interval=None,
-                            open_timeout=10,
-                            close_timeout=5,
-                        ) as ping_ws:
-                            logger.debug("💓 Ping process connected")
-                            
-                            # 20秒間隔でping送信
-                            for _ in range(200):  # 20秒を0.1秒刻み
-                                if shutdown_event.is_set():
-                                    return
-                                await asyncio.sleep(0.1)
-                            
-                            if not shutdown_event.is_set():
-                                ping_msg = {"method": "ping"}
-                                await ping_ws.send(json.dumps(ping_msg))
-                                logger.debug("💓 Ping sent from dedicated process")
-                                
-                    except Exception as e:
-                        logger.warning(f"Ping process error: {e}")
-                        # エラー時は5秒待機してリトライ
-                        for _ in range(50):
-                            if shutdown_event.is_set():
-                                return
-                            await asyncio.sleep(0.1)
-                            
-            except Exception as e:
-                logger.error(f"Ping process failed: {e}")
-        
-        # プロセス内でasyncioループを実行
+    async def _send_periodic_ping(self, websocket):
+        """軽量ping送信（接続エラー軽減版）"""
         try:
-            asyncio.run(ping_loop())
+            while not self.shutdown_event.is_set():
+                # 30秒間隔で送信（接続負荷軽減）
+                for _ in range(300):  # 30秒を0.1秒刻み
+                    if self.shutdown_event.is_set():
+                        return
+                    await asyncio.sleep(0.1)
+                
+                if self.shutdown_event.is_set():
+                    break
+                    
+                try:
+                    # 軽量ping送信（エラー耐性強化）
+                    ping_msg = {"method": "ping"}
+                    await asyncio.wait_for(
+                        websocket.send(json.dumps(ping_msg)), timeout=2.0
+                    )
+                    logger.debug("💓 Sent ping to maintain connection")
+                except (asyncio.TimeoutError, websockets.exceptions.ConnectionClosed):
+                    # 接続エラーは警告レベルに下げる
+                    logger.debug("💓 Ping failed (connection issue)")
+                    break
+                except Exception as e:
+                    logger.debug(f"💓 Ping error: {e}")
+                    break
+        except asyncio.CancelledError:
+            logger.debug("Ping task cancelled")
         except Exception as e:
-            logger.error(f"Ping process asyncio error: {e}")
+            logger.warning(f"Ping task error: {e}")
 
 
 # MEXCClientとしてWebSocket版を使用
