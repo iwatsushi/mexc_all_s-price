@@ -81,16 +81,16 @@ class TradeMini:
         # 統計表示タイマー
         self.stats_timer = None
 
-        # 🛡️ パターンB': バッチ処理制御（WebSocket受信を最優先保護）
-        self.batch_processing_semaphore = asyncio.Semaphore(
-            2
-        )  # バッチ処理の同時実行制限
+        # 🛡️ 受信とデータ処理の完全分離設計
+        self.data_queue = asyncio.Queue(maxsize=100)  # 受信データキュー
+        self.processing_active = True  # データ処理ワーカー制御
 
         # 📊 価格履歴管理（10秒前比較用） - symbol -> deque([(timestamp_sec, price), ...])
         self.price_history = defaultdict(lambda: deque(maxlen=15))  # 約15秒分のバッファ
 
-        # 🎯 バッチ処理フラグ（重複バッチ処理の防止）
-        self._batch_processing = False
+        # 📈 統計カウンタ（WebSocket受信とデータ処理で分離）
+        self.reception_stats = {"batches_received": 0, "tickers_received": 0}
+        self.processing_stats = {"batches_processed": 0, "tickers_processed": 0}
 
         logger.info("Trade Mini initialized")
 
@@ -195,6 +195,9 @@ class TradeMini:
             # 統計表示タイマー開始
             self._start_stats_timer()
 
+            # 🔄 データ処理ワーカー開始（受信とは完全独立）
+            asyncio.create_task(self._data_processing_worker())
+
             logger.info("All components initialized successfully")
 
         except Exception as e:
@@ -203,29 +206,136 @@ class TradeMini:
             raise
 
     def _on_ticker_batch_received(self, tickers: list):
-        """ティッカーバッチ受信時のコールバック（超軽量版 - WebSocket絶対保護）"""
+        """WebSocket受信コールバック（受信のみ - 処理とは完全分離）"""
         try:
-            # 🚀 最小限統計更新のみ（1ms以下で完了）
-            self.stats["ticks_processed"] += len(tickers)
+            # 🚀 受信統計のみ更新（超高速 < 0.1ms）
+            self.reception_stats["batches_received"] += 1
+            self.reception_stats["tickers_received"] += len(tickers)
             current_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            logger.info(f"📥 [{current_time}] Batch: {len(tickers)} tickers, total: {self.stats['ticks_processed']}")
-
-            # 🎯 超軽量処理：最初の10銘柄のみ価格履歴更新（WebSocket保護最優先）
-            batch_ts_sec = int(time.time())
-            for ticker_data in tickers[:10]:  # わずか10銘柄のみ
-                if isinstance(ticker_data, dict):
-                    symbol = ticker_data.get("symbol", "")
-                    price = float(ticker_data.get("lastPrice", 0))
-                    if symbol and price > 0:
-                        # 価格履歴のみ更新（超高速）
-                        self.price_history[symbol].append((batch_ts_sec, price))
-
-            # 🔄 非同期処理は完全にスキップ（WebSocket受信を絶対保護）
-            logger.info(f"✅ [{current_time}] Minimal processing completed, WebSocket ready for next message")
+            
+            # 📨 キューに投入するだけ（WebSocket受信とデータ処理を完全分離）
+            try:
+                self.data_queue.put_nowait({
+                    "tickers": tickers,
+                    "timestamp": time.time(),
+                    "batch_id": self.reception_stats["batches_received"]
+                })
+                logger.info(f"📥 [{current_time}] Received batch #{self.reception_stats['batches_received']}: {len(tickers)} tickers → Queue")
+                
+            except asyncio.QueueFull:
+                # キューが満杯の場合は古いデータを破棄
+                try:
+                    self.data_queue.get_nowait()  # 古いデータを削除
+                    self.data_queue.put_nowait({
+                        "tickers": tickers,
+                        "timestamp": time.time(),
+                        "batch_id": self.reception_stats["batches_received"]
+                    })
+                    logger.warning(f"⚠️ Queue full, dropped old batch, added new batch #{self.reception_stats['batches_received']}")
+                except asyncio.QueueEmpty:
+                    logger.error(f"❌ Failed to queue batch #{self.reception_stats['batches_received']}")
 
         except Exception as e:
-            # エラーログは出すが、WebSocket受信は継続
-            logger.error(f"Error in batch reception: {e}")
+            # エラーが発生してもWebSocket受信は継続
+            logger.error(f"Error in reception callback: {e}")
+
+    async def _data_processing_worker(self):
+        """データ処理ワーカー（受信と完全独立・1つのタスクで全銘柄処理）"""
+        logger.info("🔄 Data processing worker started (independent from WebSocket reception)")
+        
+        while self.processing_active:
+            try:
+                # キューからデータを取得（ブロッキング）
+                batch_data = await self.data_queue.get()
+                
+                tickers = batch_data["tickers"]
+                batch_timestamp = batch_data["timestamp"]
+                batch_id = batch_data["batch_id"]
+                
+                # ⚡ 1つのタスクで全銘柄を効率的に処理
+                await self._process_single_batch_efficiently(tickers, batch_timestamp, batch_id)
+                
+                # タスク完了をマーク
+                self.data_queue.task_done()
+                
+            except asyncio.CancelledError:
+                logger.info("Data processing worker cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error in data processing worker: {e}")
+                await asyncio.sleep(1.0)  # エラー時は少し待機
+
+    async def _process_single_batch_efficiently(self, tickers: list, batch_timestamp: float, batch_id: int):
+        """1つのタスクで全銘柄を効率的に処理（GIL制約考慮）"""
+        try:
+            start_time = time.time()
+            batch_ts_sec = int(batch_timestamp)
+            trading_exchange = self.config.get("trading.exchange", "bybit")
+            
+            # 処理統計更新
+            self.processing_stats["batches_processed"] += 1
+            self.processing_stats["tickers_processed"] += len(tickers)
+            
+            logger.info(f"🔄 Processing batch #{batch_id}: {len(tickers)} tickers (worker independent)")
+            
+            # 📊 効率的な一括処理（forループ内での非同期タスク生成を回避）
+            signals_count = 0
+            significant_changes = 0
+            processed_count = 0
+            
+            # 全銘柄を順次処理（1つのタスク内で完結）
+            for ticker_data in tickers:
+                if not isinstance(ticker_data, dict):
+                    continue
+                
+                symbol = ticker_data.get("symbol", "")
+                price = float(ticker_data.get("lastPrice", 0))
+                
+                if not symbol or price <= 0:
+                    continue
+                
+                # 📈 価格履歴更新（高速）
+                self.price_history[symbol].append((batch_ts_sec, price))
+                price_change_percent = self._update_price_history_and_get_change(symbol, price, batch_ts_sec)
+                
+                # TickData作成
+                tick = TickData(
+                    symbol=symbol,
+                    price=price,
+                    timestamp=datetime.now(),
+                    volume=float(ticker_data.get("volume24", 0))
+                )
+                
+                # データ管理
+                self.data_manager.add_tick(tick)
+                
+                # 🎯 戦略分析（主要銘柄のみ - 効率化）
+                if processed_count < 20 and trading_exchange == "bybit":
+                    if self.symbol_mapper.is_tradeable_on_bybit(symbol):
+                        signal = self.strategy.analyze_tick(tick)
+                        
+                        if signal and signal.signal_type != SignalType.NONE:
+                            signals_count += 1
+                            logger.info(f"🚨 SIGNAL: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f}")
+                
+                # 📊 統計収集
+                if abs(price_change_percent) > 1.0:
+                    significant_changes += 1
+                
+                # 💾 QuestDB保存（一部のみ）
+                if processed_count < 10:
+                    self.questdb_client.save_tick_data(tick)
+                
+                processed_count += 1
+            
+            # ⏱️ 処理時間計測
+            duration = time.time() - start_time
+            current_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            
+            logger.info(f"✅ [{current_time}] Batch #{batch_id} completed: {processed_count}/{len(tickers)} processed in {duration:.3f}s, signals: {signals_count}")
+            
+        except Exception as e:
+            logger.error(f"Error processing batch #{batch_id}: {e}")
 
     def _minimal_sync_processing(self, tickers: list):
         """同期フォールバック処理（最小限のデータ保存のみ）"""
@@ -672,6 +782,7 @@ class TradeMini:
 
         self.running = False
         self.shutdown_event.set()
+        self.processing_active = False  # データ処理ワーカー停止
 
         try:
             # 統計タイマー停止
