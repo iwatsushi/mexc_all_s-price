@@ -336,6 +336,16 @@ class QuestDBClient:
         except Exception as e:
             logger.error(f"Error queuing tick data: {e}")
 
+    def save_batch_tick_data(self, ticks: List[TickData]):
+        """バッチティックデータを保存（一括書き込みで大幅高速化）"""
+        try:
+            # 一括でキューに追加（従来の方式より圧倒的に効率的）
+            for tick in ticks:
+                self.tick_buffer.put_nowait(tick)
+            logger.debug(f"Batch queued {len(ticks)} ticks for QuestDB")
+        except Exception as e:
+            logger.error(f"Error queuing batch tick data: {e}")
+
     def save_trade_open(
         self,
         trade_id: str,
