@@ -84,8 +84,12 @@ class TradeMini:
 
         # 🛡️ 真のマルチプロセス分離設計
         self.data_queue = multiprocessing.Queue(maxsize=10)  # プロセス間通信キュー
-        self.processing_active = multiprocessing.Value('b', True)  # プロセス間共有フラグ
-        self.worker_heartbeat = multiprocessing.Value('d', time.time())  # ワーカーハートビート
+        self.processing_active = multiprocessing.Value(
+            "b", True
+        )  # プロセス間共有フラグ
+        self.worker_heartbeat = multiprocessing.Value(
+            "d", time.time()
+        )  # ワーカーハートビート
         self.data_processor = None  # データ処理プロセス
 
         # 📊 価格履歴管理（10秒前比較用） - symbol -> deque([(timestamp_sec, price), ...])
@@ -214,21 +218,27 @@ class TradeMini:
             # 🚀 受信証明のみ（極限の軽量化 < 0.001ms）
             self.reception_stats["batches_received"] += 1
             current_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            
+
             # 📨 受信証明ログのみ
-            logger.info(f"🔥 [{current_time}] WebSocket ALIVE! Batch #{self.reception_stats['batches_received']}: {len(tickers)} tickers → Multi-Process Queue")
-            
+            logger.info(
+                f"🔥 [{current_time}] WebSocket ALIVE! Batch #{self.reception_stats['batches_received']}: {len(tickers)} tickers → Multi-Process Queue"
+            )
+
             # 🎯 マルチプロセスキューに瞬間投入（ノンブロッキング）
             try:
                 # 生データをそのまま送信（変換処理なし）
-                self.data_queue.put_nowait({
-                    "tickers": tickers,
-                    "timestamp": time.time(),
-                    "batch_id": self.reception_stats["batches_received"]
-                })
+                self.data_queue.put_nowait(
+                    {
+                        "tickers": tickers,
+                        "timestamp": time.time(),
+                        "batch_id": self.reception_stats["batches_received"],
+                    }
+                )
             except:
                 # キューが満杯でも受信は継続（データ処理より受信を優先）
-                logger.debug(f"Multi-process queue full, skipping batch #{self.reception_stats['batches_received']}")
+                logger.debug(
+                    f"Multi-process queue full, skipping batch #{self.reception_stats['batches_received']}"
+                )
 
         except Exception as e:
             # エラーが発生してもWebSocket受信は絶対に停止しない
@@ -237,30 +247,39 @@ class TradeMini:
     def _start_multiprocess_data_worker(self):
         """マルチプロセスデータ処理ワーカーを開始"""
         logger.info("🚀 Starting multi-process data worker (true process separation)")
-        
+
         # 独立プロセスでデータ処理を実行
         self.data_processor = multiprocessing.Process(
             target=self._multiprocess_data_worker,
             args=(self.data_queue, self.processing_active, self.worker_heartbeat),
-            daemon=True
+            daemon=True,
         )
         self.data_processor.start()
-        logger.info(f"✅ Multi-process data worker started with PID: {self.data_processor.pid}")
+        logger.info(
+            f"✅ Multi-process data worker started with PID: {self.data_processor.pid}"
+        )
 
     @staticmethod
-    def _multiprocess_data_worker(data_queue: multiprocessing.Queue, processing_active: multiprocessing.Value, worker_heartbeat: multiprocessing.Value):
+    def _multiprocess_data_worker(
+        data_queue: multiprocessing.Queue,
+        processing_active: multiprocessing.Value,
+        worker_heartbeat: multiprocessing.Value,
+    ):
         """独立プロセスでのデータ処理（GIL完全回避）"""
         import time
         from datetime import datetime
-        
+
         # プロセス独立ログ設定
         from loguru import logger
+
         logger.add("multiprocess_worker.log", rotation="1 MB")
-        
-        logger.info(f"🔄 Multi-process data worker started in PID: {multiprocessing.current_process().pid}")
-        
+
+        logger.info(
+            f"🔄 Multi-process data worker started in PID: {multiprocessing.current_process().pid}"
+        )
+
         last_heartbeat = time.time()
-        
+
         while processing_active.value:
             try:
                 # 🩸 ハートビート更新（5秒毎）
@@ -268,61 +287,69 @@ class TradeMini:
                 if current_time - last_heartbeat >= 5.0:
                     worker_heartbeat.value = current_time
                     last_heartbeat = current_time
-                    logger.debug(f"💓 Worker heartbeat: {datetime.fromtimestamp(current_time).strftime('%H:%M:%S')}")
-                
+                    logger.debug(
+                        f"💓 Worker heartbeat: {datetime.fromtimestamp(current_time).strftime('%H:%M:%S')}"
+                    )
+
                 # キューからデータを取得（タイムアウト付き）
                 try:
                     batch_data = data_queue.get(timeout=1.0)
                 except:
                     continue  # タイムアウト時は次の循環へ
-                
+
                 tickers = batch_data["tickers"]
                 batch_timestamp = batch_data["timestamp"]
                 batch_id = batch_data["batch_id"]
-                
+
                 # 🚀 高速処理（JSONからQuestDB形式への直接変換）
-                TradeMini._process_batch_lightning_fast(tickers, batch_timestamp, batch_id)
-                
+                TradeMini._process_batch_lightning_fast(
+                    tickers, batch_timestamp, batch_id
+                )
+
                 # 処理後にもハートビート更新
                 worker_heartbeat.value = time.time()
-                
+
             except Exception as e:
                 logger.error(f"Error in multi-process data worker: {e}")
                 time.sleep(0.1)  # エラー時は短時間待機
-        
+
         logger.info("Multi-process data worker shutdown completed")
 
     def _check_multiprocess_health(self):
         """マルチプロセスワーカーのヘルスチェック"""
         try:
             current_time = time.time()
-            
+
             # ワーカープロセスの生存確認
             if self.data_processor and not self.data_processor.is_alive():
-                logger.error("🚨 Multi-process data worker is dead! Attempting restart...")
+                logger.error(
+                    "🚨 Multi-process data worker is dead! Attempting restart..."
+                )
                 self._restart_multiprocess_worker()
                 return
-            
+
             # ハートビートチェック
             last_heartbeat = self.worker_heartbeat.value
             heartbeat_age = current_time - last_heartbeat
-            
+
             if heartbeat_age > 30.0:  # 30秒以上ハートビートがない
                 logger.warning(f"⚠️ Worker heartbeat stale: {heartbeat_age:.1f}s ago")
                 if heartbeat_age > 60.0:  # 1分以上なら強制再起動
                     logger.error("🚨 Worker heartbeat timeout! Restarting worker...")
                     self._restart_multiprocess_worker()
                     return
-            
+
             # キューサイズ監視
             queue_size = self.data_queue.qsize()
             if queue_size >= 8:  # キューが詰まっている
                 logger.warning(f"⚠️ Data queue congestion: {queue_size}/10 items")
-            
+
             # 正常時のヘルスレポート
             worker_pid = self.data_processor.pid if self.data_processor else "None"
-            logger.debug(f"💪 Health check OK - Worker PID: {worker_pid}, Queue: {queue_size}/10, Heartbeat: {heartbeat_age:.1f}s ago")
-            
+            logger.debug(
+                f"💪 Health check OK - Worker PID: {worker_pid}, Queue: {queue_size}/10, Heartbeat: {heartbeat_age:.1f}s ago"
+            )
+
         except Exception as e:
             logger.error(f"Error in health check: {e}")
 
@@ -330,7 +357,7 @@ class TradeMini:
         """マルチプロセスワーカーを再起動"""
         try:
             logger.info("🔄 Restarting multi-process data worker...")
-            
+
             # 古いプロセスを停止
             if self.data_processor:
                 self.processing_active.value = False
@@ -339,65 +366,71 @@ class TradeMini:
                 if self.data_processor.is_alive():
                     logger.warning("Force killing stuck worker process")
                     self.data_processor.kill()
-            
+
             # 新しいプロセスを開始
             self.processing_active.value = True
             self.worker_heartbeat.value = time.time()
             self._start_multiprocess_data_worker()
-            
+
             logger.info("✅ Multi-process worker restart completed")
-            
+
         except Exception as e:
             logger.error(f"Failed to restart multi-process worker: {e}")
 
     @staticmethod
-    def _process_batch_lightning_fast(tickers: list, batch_timestamp: float, batch_id: int):
+    def _process_batch_lightning_fast(
+        tickers: list, batch_timestamp: float, batch_id: int
+    ):
         """超高速バッチ処理（JSONから直接QuestDB形式に変換）"""
-        import time
         import socket
+        import time
         from datetime import datetime
-        
+
         start_time = time.time()
         processed_count = 0
         questdb_lines = []
-        
+
         try:
             # 🚀 JSONから直接QuestDB ILP形式に変換（フィルタリングなし）
             batch_ts_ns = int(batch_timestamp * 1_000_000_000)
-            
+
             for ticker_data in tickers:
                 if not isinstance(ticker_data, dict):
                     continue
-                
+
                 symbol = ticker_data.get("symbol", "")
                 price = ticker_data.get("lastPrice")
                 volume = ticker_data.get("volume24", "0")
-                
+
                 if symbol and price:
                     try:
                         price_f = float(price)
                         volume_f = float(volume)
-                        
+
                         # QuestDB ILP形式で直接生成
                         line = f"tick_data,symbol={symbol} price={price_f},volume={volume_f} {batch_ts_ns}"
                         questdb_lines.append(line)
                         processed_count += 1
-                        
+
                     except (ValueError, TypeError):
                         continue
-            
+
             # 🚀 QuestDB一括書き込み（超高速実装）
             questdb_saved = 0
             if questdb_lines:
                 questdb_saved = TradeMini._send_to_questdb_lightning(questdb_lines)
-            
+
             duration = time.time() - start_time
             # printをloguruログに変更
             from loguru import logger
-            logger.info(f"⚡ Lightning batch #{batch_id}: {processed_count}/{len(tickers)} processed, {questdb_saved} saved to QuestDB in {duration:.3f}s")
-            
+
+            logger.info(
+                f"⚡ Lightning batch #{batch_id}: {processed_count}/{len(tickers)} processed, {questdb_saved} saved to QuestDB in {duration:.3f}s"
+            )
+
         except Exception as e:
             from loguru import logger
+
             logger.error(f"Error in lightning processing: {e}")
 
     @staticmethod
@@ -405,49 +438,54 @@ class TradeMini:
         """QuestDBに超高速で一括送信（マルチプロセス用）"""
         try:
             import socket  # マルチプロセス内で明示的にインポート
-            
+
             # QuestDB ILP接続
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5.0)
             sock.connect(("questdb", 9009))
-            
+
             # 全行を一括送信
             ilp_data = "\n".join(ilp_lines) + "\n"
             sock.sendall(ilp_data.encode("utf-8"))
             sock.close()
-            
+
             from loguru import logger
+
             logger.debug(f"✅ QuestDB ILP: {len(ilp_lines)} records sent successfully")
             return len(ilp_lines)
-            
+
         except Exception as e:
             from loguru import logger
+
             logger.warning(f"QuestDB write error: {e}")
             return 0
 
-
-    async def _process_single_batch_efficiently(self, tickers: list, batch_timestamp: float, batch_id: int):
+    async def _process_single_batch_efficiently(
+        self, tickers: list, batch_timestamp: float, batch_id: int
+    ):
         """1つのタスクで全銘柄を効率的に処理（GIL制約考慮）"""
         try:
             start_time = time.time()
             batch_ts_sec = int(batch_timestamp)
             trading_exchange = self.config.get("trading.exchange", "bybit")
-            
+
             # 処理統計更新
             self.processing_stats["batches_processed"] += 1
             self.processing_stats["tickers_processed"] += len(tickers)
-            
-            logger.info(f"🔄 Processing batch #{batch_id}: {len(tickers)} tickers (全銘柄分析 - エントリー機会を逃さない)")
-            
+
+            logger.info(
+                f"🔄 Processing batch #{batch_id}: {len(tickers)} tickers (全銘柄分析 - エントリー機会を逃さない)"
+            )
+
             # 📊 効率的な一括処理（全銘柄対応 - 軽量化）
             signals_count = 0
             significant_changes = 0
             processed_count = 0
             tradeable_count = 0
-            
+
             # 🚀 QuestDB一括書き込み用のリスト
             batch_ticks_for_questdb = []
-            
+
             # 全銘柄を順次処理（1つのタスク内で完結 - 軽量版）
             for ticker_data in tickers:
                 # 🚀 処理数の制限で早期終了（WebSocket受信を保護）
@@ -455,72 +493,82 @@ class TradeMini:
                     break
                 if not isinstance(ticker_data, dict):
                     continue
-                
+
                 symbol = ticker_data.get("symbol", "")
                 price = float(ticker_data.get("lastPrice", 0))
-                
+
                 if not symbol or price <= 0:
                     continue
-                
+
                 # 📈 価格履歴更新（高速）
                 self.price_history[symbol].append((batch_ts_sec, price))
-                price_change_percent = self._update_price_history_and_get_change(symbol, price, batch_ts_sec)
-                
+                price_change_percent = self._update_price_history_and_get_change(
+                    symbol, price, batch_ts_sec
+                )
+
                 # TickData作成
                 tick = TickData(
                     symbol=symbol,
                     price=price,
                     timestamp=datetime.now(),
-                    volume=float(ticker_data.get("volume24", 0))
+                    volume=float(ticker_data.get("volume24", 0)),
                 )
-                
+
                 # データ管理
                 self.data_manager.add_tick(tick)
-                
+
                 # 🎯 戦略分析（全銘柄対応 - エントリー機会を逃さない）
                 if trading_exchange == "bybit":
                     if self.symbol_mapper.is_tradeable_on_bybit(symbol):
                         tradeable_count += 1
-                        
+
                         # 戦略分析を軽量化（処理時間を短縮）
                         if tradeable_count <= 50:  # 最初の50銘柄のみ詳細分析
                             signal = self.strategy.analyze_tick(tick)
-                            
+
                             if signal and signal.signal_type != SignalType.NONE:
                                 signals_count += 1
-                                logger.info(f"🚨 SIGNAL: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f}")
-                                
+                                logger.info(
+                                    f"🚨 SIGNAL: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f}"
+                                )
+
                                 # 🚀 シグナル処理を非同期で実行（WebSocket受信をブロックしない）
                                 asyncio.create_task(self._process_signal(signal))
-                
+
                 # 📊 統計収集（全銘柄）
                 if abs(price_change_percent) > 1.0:
                     significant_changes += 1
-                
+
                 # 💾 QuestDB保存用リストに追加（一括書き込み用）
-                if processed_count < 100 or abs(price_change_percent) > 1.0:  # 重要な銘柄のみ保存
+                if (
+                    processed_count < 100 or abs(price_change_percent) > 1.0
+                ):  # 重要な銘柄のみ保存
                     batch_ticks_for_questdb.append(tick)
-                
+
                 processed_count += 1
-                
+
                 # 🚀 定期的にイベントループを譲る（WebSocket受信をブロックしない）
                 if processed_count % 25 == 0:
                     await asyncio.sleep(0.001)  # 1ms待機でイベントループを譲る
-            
+
             # 🚀 QuestDB一括書き込み（大幅なパフォーマンス向上）
             if batch_ticks_for_questdb:
                 try:
                     self.questdb_client.save_batch_tick_data(batch_ticks_for_questdb)
-                    logger.info(f"💾 QuestDB batch write: {len(batch_ticks_for_questdb)} ticks saved efficiently")
+                    logger.info(
+                        f"💾 QuestDB batch write: {len(batch_ticks_for_questdb)} ticks saved efficiently"
+                    )
                 except Exception as e:
                     logger.error(f"Error in QuestDB batch write: {e}")
-            
+
             # ⏱️ 処理時間計測
             duration = time.time() - start_time
             current_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            
-            logger.info(f"✅ [{current_time}] Batch #{batch_id} completed: {processed_count}/{len(tickers)} processed in {duration:.3f}s, tradeable: {tradeable_count}, signals: {signals_count}, significant_changes: {significant_changes}, questdb_saved: {len(batch_ticks_for_questdb)}")
-            
+
+            logger.info(
+                f"✅ [{current_time}] Batch #{batch_id} completed: {processed_count}/{len(tickers)} processed in {duration:.3f}s, tradeable: {tradeable_count}, signals: {signals_count}, significant_changes: {significant_changes}, questdb_saved: {len(batch_ticks_for_questdb)}"
+            )
+
         except Exception as e:
             logger.error(f"Error processing batch #{batch_id}: {e}")
 
@@ -576,11 +624,12 @@ class TradeMini:
             logger.info(f"✅ Semaphore acquired, starting batch processing")
             self._batch_processing = True
             try:
-                await self._process_single_batch_efficiently(tickers, time.time(), self.processing_stats["batches_processed"])
+                await self._process_single_batch_efficiently(
+                    tickers, time.time(), self.processing_stats["batches_processed"]
+                )
             finally:
                 self._batch_processing = False
                 logger.info(f"🔓 Batch processing completed, releasing semaphore")
-
 
     async def _background_questdb_save(self, tick: TickData):
         """バックグラウンドでのQuestDB保存処理（トレーディングをブロックしない）"""
@@ -874,12 +923,12 @@ class TradeMini:
 
         self.running = False
         self.shutdown_event.set()
-        
+
         # マルチプロセスワーカー停止
-        if hasattr(self, 'processing_active'):
+        if hasattr(self, "processing_active"):
             self.processing_active.value = False
-        
-        if hasattr(self, 'data_processor') and self.data_processor:
+
+        if hasattr(self, "data_processor") and self.data_processor:
             logger.info("Terminating multi-process data worker...")
             self.data_processor.terminate()
             self.data_processor.join(timeout=5)
@@ -949,8 +998,8 @@ async def main():
     """メイン関数"""
     try:
         # マルチプロセス開始方法を設定（Dockerコンテナ対応）
-        multiprocessing.set_start_method('fork', force=True)
-        
+        multiprocessing.set_start_method("fork", force=True)
+
         # Trade Mini インスタンス作成
         app = TradeMini()
 

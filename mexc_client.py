@@ -260,7 +260,7 @@ class MEXCWebSocketClient:
                 except asyncio.TimeoutError:
                     # タイムアウト（1秒間メッセージなし）- スタール検出（デバッグスクリプトと同じ方式）
                     since = time.monotonic() - last_recv
-                    if since > 10:  # 10秒でスタール警告
+                    if since > 15:  # 15秒でスタール警告（少し延長）
                         logger.warning(
                             f"⚠️ MEXC WebSocket STALL: {since:.1f}秒間メッセージを受信していません"
                         )
@@ -270,6 +270,22 @@ class MEXCWebSocketClient:
                         logger.info(
                             f"⏰ WebSocket timeout check: {since:.1f}s since last message (total_messages: {message_count})"
                         )
+                    
+                    # 🔄 タイムアウト後のヘルスチェック追加
+                    try:
+                        # WebSocket接続の健全性確認
+                        if websocket.closed:
+                            logger.warning("🚨 WebSocket connection closed detected during timeout")
+                            raise websockets.exceptions.ConnectionClosed(None, None)
+                        
+                        # ハートビート的なping送信（接続状態確認）
+                        await asyncio.wait_for(websocket.ping(), timeout=1.0)
+                        logger.debug("💓 WebSocket ping successful during timeout check")
+                        
+                    except Exception as health_error:
+                        logger.error(f"🚨 WebSocket health check failed: {health_error}")
+                        raise websockets.exceptions.ConnectionClosed(None, None)
+                    
                     continue  # タイムアウト時は継続
 
                 except json.JSONDecodeError:
