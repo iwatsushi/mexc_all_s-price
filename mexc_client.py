@@ -79,6 +79,10 @@ class MEXCWebSocketClient:
         
         # デバッグフラグ
         self._debug_interval_stats = False
+        
+        # ping管理（受信ループ内で実行）
+        self._last_ping_time = 0
+        self._ping_interval = 20  # 20秒間隔
 
     async def connect(self) -> bool:
         """WebSocket接続開始"""
@@ -172,8 +176,8 @@ class MEXCWebSocketClient:
 
         async with websockets.connect(
             self.ws_url,
-            ping_interval=None,  # 手動pingを使用
-            max_size=None,  # フレームサイズ制限を解除
+            ping_interval=None,  # WebSocketレベルのpingは無効化
+            max_size=None,       # フレームサイズ制限を解除
             open_timeout=20,
             close_timeout=5,
         ) as websocket:
@@ -190,8 +194,9 @@ class MEXCWebSocketClient:
             # sub.tickersのみに集中（シンプル化）
             logger.info("Focusing on sub.tickers only for continuous data")
 
-            # ping定期送信用タスクを開始（軽量版）
-            ping_task = asyncio.create_task(self._send_periodic_ping(websocket))
+            # ping初期化（受信ループ内で管理）
+            self._last_ping_time = time.monotonic()
+            logger.info("💓 MEXC ping initialized (20s interval, inline)")
 
             # メッセージ受信ループ（デバッグスクリプトと同じタイムアウト方式を採用）
             last_recv = time.monotonic()  # デバッグスクリプトと同じ単調時間を使用
@@ -238,6 +243,16 @@ class MEXCWebSocketClient:
                         self._process_ticker_batch_safe(raw_message)
                     else:
                         logger.debug(f"⚠️ No batch callback configured, dropping message #{message_count}")
+                    
+                    # 💓 軽量ping送信チェック（受信イベント内で実行）
+                    if rx_time - self._last_ping_time >= self._ping_interval:
+                        try:
+                            ping_msg = {"method": "ping"}
+                            await websocket.send(json.dumps(ping_msg))
+                            self._last_ping_time = rx_time
+                            logger.info("💓 MEXC ping sent (inline)")
+                        except Exception as e:
+                            logger.warning(f"💓 Failed to send ping: {e}")
 
                 except asyncio.TimeoutError:
                     # タイムアウト（1秒間メッセージなし）- スタール検出（デバッグスクリプトと同じ方式）
@@ -266,13 +281,8 @@ class MEXCWebSocketClient:
                 except Exception as e:
                     logger.error(f"Error processing WebSocket message: {e}")
 
-            # pingタスクをキャンセル
-            if "ping_task" in locals():
-                ping_task.cancel()
-                try:
-                    await ping_task
-                except asyncio.CancelledError:
-                    pass
+            # inline ping管理のため特別なクリーンアップ不要
+            logger.info("💓 MEXC inline ping stopped")
 
     def _process_ticker_batch_safe(self, raw_message):
         """WebSocket受信を保護する超高速バッチティッカーデータ処理（生データ解凍統合版）"""
@@ -361,37 +371,7 @@ class MEXCWebSocketClient:
         # 新しい安全な処理に移譲
         self._process_ticker_data_safe(tickers)
 
-    async def _send_periodic_ping(self, websocket):
-        """軽量ping送信（接続エラー軽減版）"""
-        try:
-            while not self.shutdown_event.is_set():
-                # 30秒間隔で送信（接続負荷軽減）
-                for _ in range(300):  # 30秒を0.1秒刻み
-                    if self.shutdown_event.is_set():
-                        return
-                    await asyncio.sleep(0.1)
-                
-                if self.shutdown_event.is_set():
-                    break
-                    
-                try:
-                    # 軽量ping送信（エラー耐性強化）
-                    ping_msg = {"method": "ping"}
-                    await asyncio.wait_for(
-                        websocket.send(json.dumps(ping_msg)), timeout=2.0
-                    )
-                    logger.debug("💓 Sent ping to maintain connection")
-                except (asyncio.TimeoutError, websockets.exceptions.ConnectionClosed):
-                    # 接続エラーは警告レベルに下げる
-                    logger.debug("💓 Ping failed (connection issue)")
-                    break
-                except Exception as e:
-                    logger.debug(f"💓 Ping error: {e}")
-                    break
-        except asyncio.CancelledError:
-            logger.debug("Ping task cancelled")
-        except Exception as e:
-            logger.warning(f"Ping task error: {e}")
+
 
 
 # MEXCClientとしてWebSocket版を使用
