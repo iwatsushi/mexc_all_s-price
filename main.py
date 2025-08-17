@@ -283,6 +283,7 @@ class TradeMini:
     def _process_batch_lightning_fast(tickers: list, batch_timestamp: float, batch_id: int):
         """超高速バッチ処理（JSONから直接QuestDB形式に変換）"""
         import time
+        import socket
         from datetime import datetime
         
         start_time = time.time()
@@ -314,16 +315,44 @@ class TradeMini:
                     except (ValueError, TypeError):
                         continue
             
-            # 🚀 QuestDB一括書き込み（実装は後で追加）
+            # 🚀 QuestDB一括書き込み（超高速実装）
+            questdb_saved = 0
             if questdb_lines:
-                # TODO: QuestDBに一括送信
-                pass
+                questdb_saved = TradeMini._send_to_questdb_lightning(questdb_lines)
             
             duration = time.time() - start_time
-            print(f"⚡ Lightning batch #{batch_id}: {processed_count}/{len(tickers)} processed in {duration:.3f}s")
+            # printをloguruログに変更
+            from loguru import logger
+            logger.info(f"⚡ Lightning batch #{batch_id}: {processed_count}/{len(tickers)} processed, {questdb_saved} saved to QuestDB in {duration:.3f}s")
             
         except Exception as e:
-            print(f"Error in lightning processing: {e}")
+            from loguru import logger
+            logger.error(f"Error in lightning processing: {e}")
+
+    @staticmethod
+    def _send_to_questdb_lightning(ilp_lines: list) -> int:
+        """QuestDBに超高速で一括送信（マルチプロセス用）"""
+        try:
+            import socket  # マルチプロセス内で明示的にインポート
+            
+            # QuestDB ILP接続
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5.0)
+            sock.connect(("questdb", 9009))
+            
+            # 全行を一括送信
+            ilp_data = "\n".join(ilp_lines) + "\n"
+            sock.sendall(ilp_data.encode("utf-8"))
+            sock.close()
+            
+            from loguru import logger
+            logger.debug(f"✅ QuestDB ILP: {len(ilp_lines)} records sent successfully")
+            return len(ilp_lines)
+            
+        except Exception as e:
+            from loguru import logger
+            logger.warning(f"QuestDB write error: {e}")
+            return 0
 
     async def _process_single_batch_efficiently(self, tickers: list, batch_timestamp: float, batch_id: int):
         """1つのタスクで全銘柄を効率的に処理（GIL制約考慮）"""
