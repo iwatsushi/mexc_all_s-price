@@ -206,34 +206,17 @@ class TradeMini:
             raise
 
     def _on_ticker_batch_received(self, tickers: list):
-        """WebSocket受信コールバック（受信のみ - 処理とは完全分離）"""
+        """WebSocket受信コールバック（受信証明用 - 極限まで軽量化）"""
         try:
-            # 🚀 受信統計のみ更新（超高速 < 0.1ms）
+            # 🚀 受信証明のみ（極限の軽量化 < 0.01ms）
             self.reception_stats["batches_received"] += 1
-            self.reception_stats["tickers_received"] += len(tickers)
             current_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
             
-            # 📨 キューに投入するだけ（WebSocket受信とデータ処理を完全分離）
-            try:
-                self.data_queue.put_nowait({
-                    "tickers": tickers,
-                    "timestamp": time.time(),
-                    "batch_id": self.reception_stats["batches_received"]
-                })
-                logger.info(f"📥 [{current_time}] Received batch #{self.reception_stats['batches_received']}: {len(tickers)} tickers → Queue")
-                
-            except asyncio.QueueFull:
-                # キューが満杯の場合は古いデータを破棄
-                try:
-                    self.data_queue.get_nowait()  # 古いデータを削除
-                    self.data_queue.put_nowait({
-                        "tickers": tickers,
-                        "timestamp": time.time(),
-                        "batch_id": self.reception_stats["batches_received"]
-                    })
-                    logger.warning(f"⚠️ Queue full, dropped old batch, added new batch #{self.reception_stats['batches_received']}")
-                except asyncio.QueueEmpty:
-                    logger.error(f"❌ Failed to queue batch #{self.reception_stats['batches_received']}")
+            # 📨 受信証明ログのみ（データ処理は完全スキップ）
+            logger.info(f"🔥 [{current_time}] WebSocket ALIVE! Batch #{self.reception_stats['batches_received']}: {len(tickers)} tickers received")
+            
+            # 🎯 データ処理は一時的に完全スキップ（WebSocket受信証明のため）
+            # self.data_queue.put_nowait(...) # 一時的にコメントアウト
 
         except Exception as e:
             # エラーが発生してもWebSocket受信は継続
