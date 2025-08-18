@@ -150,9 +150,10 @@ class TradingStrategy:
             tick.symbol, self.price_comparison_seconds
         )
 
-        # デバッグ用ログ
-        if tick.symbol == "BTCUSDT":  # 主要銘柄のみログ出力
-            logger.info(f"BTCUSDT: change_percent={change_percent}, price={tick.price}")
+        # デバッグ用ログ（主要銘柄のみ）
+        major_debug_symbols = ["BTCUSDT", "BTC_USDT", "ETHUSDT", "ETH_USDT"]
+        if tick.symbol in major_debug_symbols:
+            logger.info(f"{tick.symbol}: change_percent={change_percent}, price={tick.price}")
 
         # 価格変動率をキャッシュ（メイン処理から取得可能に）
         if change_percent is not None:

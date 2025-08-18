@@ -349,10 +349,18 @@ class MEXCWebSocketClient:
                 volume = float(ticker.get("volume24", 0))
 
                 if symbol and price > 0:
+                    # MEXCの実際のタイムスタンプを使用（ミリ秒単位）
+                    mexc_timestamp = ticker.get("timestamp")
+                    if mexc_timestamp is not None and isinstance(mexc_timestamp, (int, float)):
+                        tick_timestamp = datetime.fromtimestamp(mexc_timestamp / 1000)
+                    else:
+                        # フォールバック（通常は不要だが安全のため）
+                        tick_timestamp = datetime.now()
+                    
                     tick = TickData(
                         symbol=symbol,
                         price=price,
-                        timestamp=datetime.now(),
+                        timestamp=tick_timestamp,
                         volume=volume,
                     )
 

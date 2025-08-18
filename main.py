@@ -393,14 +393,32 @@ class TradeMini:
     def _init_multiprocess_components():
         """マルチプロセス開始時に一度だけ実行される初期化"""
         try:
+            print("🔧 Starting multi-process component initialization...", flush=True)
+            logger.info("🔧 Starting multi-process component initialization...")
+            
             TradeMini._mp_config = Config()
+            print("✅ Config initialized", flush=True)
+            logger.info("✅ Config initialized")
+            
             TradeMini._mp_data_manager = DataManager(TradeMini._mp_config)
+            print("✅ DataManager initialized", flush=True)
+            logger.info("✅ DataManager initialized")
+            
             TradeMini._mp_strategy = TradingStrategy(TradeMini._mp_config, TradeMini._mp_data_manager)
+            print("✅ TradingStrategy initialized", flush=True)
+            logger.info("✅ TradingStrategy initialized")
+            
             # SymbolMapperはマルチプロセスで問題があるため、完全に無効化
             TradeMini._mp_symbol_mapper = None
-            logger.info("✅ Multi-process components initialized successfully")
+            print("✅ Multi-process components initialization completed successfully", flush=True)
+            logger.info("✅ Multi-process components initialization completed successfully")
+            
         except Exception as e:
+            print(f"❌ Failed to initialize multi-process components: {e}", flush=True)
             logger.error(f"❌ Failed to initialize multi-process components: {e}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}", flush=True)
+            logger.error(f"Traceback: {traceback.format_exc()}")
             raise
 
     @staticmethod
@@ -408,8 +426,12 @@ class TradeMini:
         tickers: list, batch_timestamp: float, batch_id: int
     ):
         """バッチ処理（QuestDB保存 + 戦略分析）"""
+        # 強制的なログ出力（マルチプロセス内でのデバッグ）
+        print(f"🔥 BATCH FUNCTION CALLED: batch_id={batch_id}, tickers={len(tickers)}", flush=True)
+        
         # 初期化チェック（プロセス開始時に一度だけ）
         if TradeMini._mp_config is None:
+            print("🔧 INITIALIZING MULTIPROCESS COMPONENTS...", flush=True)
             TradeMini._init_multiprocess_components()
 
         start_time = time.time()
@@ -421,6 +443,20 @@ class TradeMini:
             # 🚀 JSONから直接QuestDB ILP形式に変換
             batch_ts_ns = int(batch_timestamp * 1_000_000_000)
 
+            # サンプルティッカーデータの構造をログ出力（最初のバッチのみ）
+            if batch_id == 1 and len(tickers) > 0:
+                sample_ticker = tickers[0]
+                print(f"🔍 Sample ticker data structure: {sample_ticker}")
+                print(f"🔍 Available fields: {list(sample_ticker.keys()) if isinstance(sample_ticker, dict) else 'Not a dict'}")
+                
+                # MEXCタイムスタンプフィールドの確認（存在するフィールドのみ）
+                mexc_ts = sample_ticker.get("timestamp")
+                print(f"🕒 MEXC TIMESTAMP CHECK:")
+                print(f"🕒   timestamp={mexc_ts} (type: {type(mexc_ts)})")
+
+            # タイムスタンプデバッグ用カウンター（バッチ毎にリセット）
+            timestamp_debug_count = 0
+
             for ticker_data in tickers:
                 if not isinstance(ticker_data, dict):
                     continue
@@ -428,14 +464,23 @@ class TradeMini:
                 symbol = ticker_data.get("symbol", "")
                 price = ticker_data.get("lastPrice")
                 volume = ticker_data.get("volume24", "0")
+                
+                # MEXCのタイムスタンプフィールドのみ取得（存在しないフィールドは不要）
+                mexc_timestamp = ticker_data.get("timestamp")
 
                 if symbol and price:
                     try:
                         price_f = float(price)
                         volume_f = float(volume)
 
+                        # MEXCタイムスタンプを使用（ミリ秒→ナノ秒変換）
+                        if mexc_timestamp and isinstance(mexc_timestamp, (int, float)):
+                            timestamp_ns = int(mexc_timestamp * 1_000_000)  # ミリ秒→ナノ秒
+                        else:
+                            timestamp_ns = batch_ts_ns  # フォールバック
+
                         # QuestDB ILP形式で直接生成
-                        line = f"tick_data,symbol={symbol} price={price_f},volume={volume_f} {batch_ts_ns}"
+                        line = f"tick_data,symbol={symbol} price={price_f},volume={volume_f} {timestamp_ns}"
                         questdb_lines.append(line)
                         processed_count += 1
                         
@@ -466,25 +511,98 @@ class TradeMini:
                         if processed_count == 1:  # 最初の銘柄で必ずログ出力
                             logger.info(f"🔍 First symbol processed: {symbol} (checking if in major_symbols)")
                         
-                        # まずは主要銘柄のみで戦略分析を実行（全銘柄は処理が重い）
-                        if symbol in major_symbols:
-                            # 戦略分析実行の確認
-                            logger.info(f"🎯 Strategy analysis STARTED for {symbol}")
-                            tick = TickData(
-                                symbol=symbol,
-                                price=price_f,
-                                timestamp=datetime.now(),
-                                volume=volume_f
-                            )
-                            
-                            TradeMini._mp_data_manager.add_tick(tick)
-                            signal = TradeMini._mp_strategy.analyze_tick(tick)
-                            
-                            # 詳細デバッグログ（最初の5つの銘柄のみ、処理数を制限）
-                            if processed_count <= 5:
-                                price_change = TradeMini._mp_data_manager.get_price_change_percent(symbol, 10)
-                                data_count = len(TradeMini._mp_data_manager.get_symbol_data(symbol).tick_data) if TradeMini._mp_data_manager.get_symbol_data(symbol) else 0
-                                logger.info(f"📊 {symbol}: price={price_f}, change={price_change}%, data_count={data_count}, signal={signal.signal_type.value if signal else 'None'}")
+                        # 🔄 Phase 2: 制御された戦略分析機能の復元
+                        signal = None
+                        
+                        # Phase 2: 制御されたデータ追加と価格変動率チェック（複数の主要銘柄でテスト）
+                        test_symbols = ["SOL_USDT", "BTC_USDT", "ETH_USDT", "KAITO_USDT", "UNI_USDT"]
+                        if symbol in test_symbols:
+                            print(f"🔍 Phase 2: Found test symbol {symbol}, processed_count={processed_count}")
+                        if symbol in test_symbols and processed_count <= 50:  # 各銘柄50回まで（テストのため）
+                            try:
+                                print(f"🔄 Phase 2: Data analysis test for {symbol} (attempt {processed_count})")
+                                
+                                # TickDataオブジェクトの作成（MEXCの実際のタイムスタンプを使用）
+                                mexc_timestamp = ticker_data.get("timestamp")
+                                if mexc_timestamp is not None and isinstance(mexc_timestamp, (int, float)):
+                                    # MEXCはミリ秒単位のUNIXタイムスタンプを提供
+                                    tick_timestamp = datetime.fromtimestamp(mexc_timestamp / 1000)
+                                else:
+                                    # フォールバック（通常は不要）
+                                    tick_timestamp = datetime.now()
+                                
+                                tick = TickData(
+                                    symbol=symbol,
+                                    price=price_f,
+                                    timestamp=tick_timestamp,
+                                    volume=volume_f
+                                )
+                                
+                                # データ追加
+                                start_time = datetime.now()
+                                TradeMini._mp_data_manager.add_tick(tick)
+                                elapsed = (datetime.now() - start_time).total_seconds()
+                                
+                                print(f"✅ Data added successfully in {elapsed:.3f}s for {symbol}")
+                                
+                                # データ件数とタイムレンジの確認
+                                symbol_data = TradeMini._mp_data_manager.get_symbol_data(symbol)
+                                if symbol_data:
+                                    data_count = symbol_data.get_data_count()
+                                    time_range = symbol_data.get_time_range()
+                                    print(f"📊 {symbol}: data_count={data_count}, time_range={time_range}")
+                                    
+                                    # 設定された時間分のデータが蓄積されているかチェック
+                                    config_seconds = TradeMini._mp_config.price_comparison_seconds
+                                    if time_range[0] and time_range[1]:
+                                        time_span = (time_range[1] - time_range[0]).total_seconds()
+                                        has_sufficient_data = time_span >= config_seconds
+                                    else:
+                                        has_sufficient_data = False
+                                    
+                                    if has_sufficient_data and data_count >= 2:
+                                        price_change = symbol_data.get_price_change_percent(config_seconds)
+                                        print(f"📈 {symbol}: price_change={price_change}% over {config_seconds}s")
+                                        
+                                        # 設定値による閾値チェック
+                                        long_threshold = TradeMini._mp_config.long_threshold_percent
+                                        short_threshold = TradeMini._mp_config.short_threshold_percent
+                                        
+                                        if price_change is not None:
+                                            if price_change >= long_threshold:
+                                                print(f"🔥 LONG THRESHOLD REACHED: {symbol} change={price_change}% >= {long_threshold}%")
+                                                
+                                                # 実際にロングポジションを開く処理
+                                                try:
+                                                    success, message, position = TradeMini._mp_position_manager.open_position(
+                                                        symbol, "LONG", price_f, tick_timestamp
+                                                    )
+                                                    if success:
+                                                        print(f"✅ LONG POSITION OPENED: {symbol} @ {price_f}")
+                                                    else:
+                                                        print(f"❌ LONG POSITION FAILED: {symbol} - {message}")
+                                                except Exception as e:
+                                                    print(f"❌ LONG POSITION ERROR: {symbol} - {e}")
+                                            
+                                            elif price_change <= -short_threshold:
+                                                print(f"🔥 SHORT THRESHOLD REACHED: {symbol} change={price_change}% <= -{short_threshold}%")
+                                                
+                                                # 実際にショートポジションを開く処理
+                                                try:
+                                                    success, message, position = TradeMini._mp_position_manager.open_position(
+                                                        symbol, "SHORT", price_f, tick_timestamp
+                                                    )
+                                                    if success:
+                                                        print(f"✅ SHORT POSITION OPENED: {symbol} @ {price_f}")
+                                                    else:
+                                                        print(f"❌ SHORT POSITION FAILED: {symbol} - {message}")
+                                                except Exception as e:
+                                                    print(f"❌ SHORT POSITION ERROR: {symbol} - {e}")
+                                
+                            except Exception as data_error:
+                                print(f"❌ Phase 2: Data analysis failed for {symbol}: {data_error}")
+                                import traceback
+                                print(f"Error traceback: {traceback.format_exc()}")
                             
                             # 🧪 強制テストシグナル（特定銘柄で確実にシグナル生成をテスト）
                             if symbol == "CSKY_USDT" and processed_count == 1:
@@ -496,6 +614,36 @@ class TradeMini:
                                 logger.info(
                                     f"🚨 SIGNAL DETECTED: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f} ({signal.reason})"
                                 )
+                                
+                                # 実際の注文処理を実行
+                                try:
+                                    if signal.signal_type in [SignalType.LONG, SignalType.SHORT]:
+                                        # 新規オープン注文
+                                        side = "LONG" if signal.signal_type == SignalType.LONG else "SHORT"
+                                        success, message, position = TradeMini._mp_position_manager.open_position(
+                                            symbol, side, signal.price, signal.timestamp
+                                        )
+                                        
+                                        if success and position:
+                                            logger.info(f"✅ POSITION OPENED: {symbol} {side} @ {signal.price:.6f}")
+                                        else:
+                                            logger.error(f"❌ POSITION OPEN FAILED: {symbol} {side} - {message}")
+                                    
+                                    elif signal.signal_type == SignalType.CLOSE:
+                                        # ポジションクローズ注文
+                                        success, message, position = TradeMini._mp_position_manager.close_position(
+                                            symbol, signal.reason
+                                        )
+                                        
+                                        if success and position:
+                                            logger.info(f"✅ POSITION CLOSED: {symbol} @ {signal.price:.6f} - {signal.reason}")
+                                        else:
+                                            logger.error(f"❌ POSITION CLOSE FAILED: {symbol} - {message}")
+                                
+                                except Exception as order_error:
+                                    logger.error(f"❌ ORDER PROCESSING ERROR: {symbol} {signal.signal_type.value} - {order_error}")
+                                    import traceback
+                                    logger.error(f"Order error traceback: {traceback.format_exc()}")
 
                     except (ValueError, TypeError):
                         continue
@@ -605,12 +753,43 @@ class TradeMini:
                         # 戦略分析を軽量化（処理時間を短縮）
                         if tradeable_count <= 50:  # 最初の50銘柄のみ詳細分析
                             signal = self.strategy.analyze_tick(tick)
+                            
+                            # 既存ポジションの価格更新（損切り・利確判定）
+                            self.position_manager.update_position_pnl(symbol, tick.price)
 
                             if signal and signal.signal_type != SignalType.NONE:
                                 signals_count += 1
                                 logger.info(
                                     f"🚨 SIGNAL: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f}"
                                 )
+                                
+                                # 実際の注文処理を実行
+                                try:
+                                    if signal.signal_type in [SignalType.LONG, SignalType.SHORT]:
+                                        # 新規オープン注文
+                                        side = "LONG" if signal.signal_type == SignalType.LONG else "SHORT"
+                                        success, message, position = self.position_manager.open_position(
+                                            symbol, side, signal.price, signal.timestamp
+                                        )
+                                        
+                                        if success and position:
+                                            logger.info(f"✅ POSITION OPENED: {symbol} {side} @ {signal.price:.6f}")
+                                        else:
+                                            logger.error(f"❌ POSITION OPEN FAILED: {symbol} {side} - {message}")
+                                    
+                                    elif signal.signal_type == SignalType.CLOSE:
+                                        # ポジションクローズ注文
+                                        success, message, position = self.position_manager.close_position(
+                                            symbol, signal.reason
+                                        )
+                                        
+                                        if success and position:
+                                            logger.info(f"✅ POSITION CLOSED: {symbol} @ {signal.price:.6f} - {signal.reason}")
+                                        else:
+                                            logger.error(f"❌ POSITION CLOSE FAILED: {symbol} - {message}")
+                                
+                                except Exception as order_error:
+                                    logger.error(f"❌ ORDER PROCESSING ERROR: {symbol} {signal.signal_type.value} - {order_error}")
 
                                 # 🚀 シグナル処理を非同期で実行（WebSocket受信をブロックしない）
                                 asyncio.create_task(self._process_signal(signal))
