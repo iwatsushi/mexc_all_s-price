@@ -128,12 +128,12 @@ class SymbolTickData:
         """N秒前からの価格変動率（%）を計算"""
         with self._lock:
             if not self.latest_tick:
-                logger.debug(f"{self.symbol}: No latest tick available")
+                logger.info(f"{self.symbol}: No latest tick available")
                 return None
 
             past_price = self.get_price_n_seconds_ago(n_seconds)
             if past_price is None or past_price == 0:
-                logger.debug(
+                logger.info(
                     f"{self.symbol}: No past price for {n_seconds}s ago (data count: {len(self.tick_data)})"
                 )
                 return None

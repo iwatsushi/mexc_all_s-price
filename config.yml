@@ -33,19 +33,19 @@ bybit:
 # 取引戦略パラメータ
 strategy:
     # N秒前の価格と比較（現実的な時間枠）
-    price_comparison_seconds: 5
+    price_comparison_seconds: 10 # 5 一時的に上昇
 
-    # 上昇トリガー閾値（X%）- アクティブな取引のため
-    long_threshold_percent: 2.0
+    # 上昇トリガー閾値（X%）- テスト用に非常に小さく設定
+    long_threshold_percent: 0.001 # 0.001% 非常に小さく調整（テスト用）
 
-    # 下落トリガー閾値（Y%）- アクティブな取引のため
-    short_threshold_percent: 2.0
+    # 下落トリガー閾値（Y%）- テスト用に非常に小さく設定
+    short_threshold_percent: 0.001 # 0.001% 非常に小さく調整（テスト用）
 
     # 利確判定の反発閾値（Z%）- トレンドフォロー戦略
-    reversal_threshold_percent: 1.5
+    reversal_threshold_percent: 0.0015 # 1.5 一時的に下降
 
     # 最小利益率（M%）- 効率的な利確
-    min_profit_percent: 0.8
+    min_profit_percent: 0.005 # 0.8 上昇
 
 # ポジション管理
 position:
@@ -107,7 +107,7 @@ questdb:
 
 # ログ設定
 logging:
-    level: "INFO"
+    level: "DEBUG"
     file: "trade_mini.log"
     max_size_mb: 10
     backup_count: 5
