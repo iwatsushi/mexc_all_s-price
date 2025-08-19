@@ -207,8 +207,12 @@ class TradeMini:
             # 統計表示タイマー開始
             self._start_stats_timer()
 
-            # 🚀 真のマルチプロセスデータ処理ワーカー開始（GIL完全回避）
-            self._start_multiprocess_data_worker()
+            # WebSocket+pingモード以外でマルチプロセス開始
+            if self.config.get('bybit.environment') != 'websocket-ping_only':
+                # 🚀 真のマルチプロセスデータ処理ワーカー開始（GIL完全回避）
+                self._start_multiprocess_data_worker()
+            else:
+                logger.info("🔍 WebSocket+ping mode: Multiprocess worker disabled")
 
             logger.info("All components initialized successfully")
 
@@ -223,6 +227,11 @@ class TradeMini:
             # 🚀 受信証明のみ（極限の軽量化 < 0.001ms）
             self.reception_stats["batches_received"] += 1
             current_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
+            # WebSocket+pingモードの場合は詳細統計のみ（データ処理スキップ）
+            if self.config.get('bybit.environment') == 'websocket-ping_only':
+                self._handle_websocket_monitor_batch(tickers, current_time)
+                return
 
             # 📨 受信証明ログのみ
             logger.info(
@@ -248,6 +257,70 @@ class TradeMini:
         except Exception as e:
             # エラーが発生してもWebSocket受信は絶対に停止しない
             logger.error(f"Error in reception callback: {e}")
+
+    def _handle_websocket_monitor_batch(self, tickers: list, current_time: str):
+        """WebSocket監視モード用バッチ処理"""
+        # 受信間隔測定
+        if not hasattr(self, '_last_monitor_time'):
+            self._last_monitor_time = time.time()
+            self._monitor_intervals = []
+            self._monitor_min_interval = float('inf')
+            self._monitor_max_interval = 0.0
+            self._monitor_start_time = time.time()
+        
+        current_timestamp = time.time()
+        if self._last_monitor_time:
+            interval = current_timestamp - self._last_monitor_time
+            self._monitor_intervals.append(interval)
+            self._monitor_min_interval = min(self._monitor_min_interval, interval)
+            self._monitor_max_interval = max(self._monitor_max_interval, interval)
+            
+            # 直近100件のみ保持
+            if len(self._monitor_intervals) > 100:
+                self._monitor_intervals.pop(0)
+        
+        self._last_monitor_time = current_timestamp
+        
+        # 統計更新
+        self.reception_stats["tickers_received"] += len(tickers)
+        
+        # 詳細ログ（受信統計）
+        logger.info(
+            f"📊 [{current_time}] WebSocket Monitor: Batch #{self.reception_stats['batches_received']}: "
+            f"{len(tickers)} tickers (total: {self.reception_stats['tickers_received']})"
+        )
+        
+        # 10秒ごとに統計表示
+        if not hasattr(self, '_last_stats_time'):
+            self._last_stats_time = current_timestamp
+        
+        if current_timestamp - self._last_stats_time >= 10.0:
+            self._print_websocket_monitor_stats()
+            self._last_stats_time = current_timestamp
+
+    def _print_websocket_monitor_stats(self):
+        """WebSocket監視モード統計表示"""
+        uptime = time.time() - self._monitor_start_time
+        
+        # 受信レート計算
+        message_rate = self.reception_stats["batches_received"] / uptime if uptime > 0 else 0
+        ticker_rate = self.reception_stats["tickers_received"] / uptime if uptime > 0 else 0
+        
+        # 受信間隔統計
+        avg_interval = 0
+        if hasattr(self, '_monitor_intervals') and self._monitor_intervals:
+            avg_interval = sum(self._monitor_intervals) / len(self._monitor_intervals)
+        
+        logger.info("📊 WebSocket Monitor Stats (Main Process):")
+        logger.info(f"   ⏱️  Uptime: {uptime:.1f}s")
+        logger.info(f"   📨 Total batches: {self.reception_stats['batches_received']} ({message_rate:.2f}/s)")
+        logger.info(f"   📈 Total tickers: {self.reception_stats['tickers_received']} ({ticker_rate:.2f}/s)")
+        
+        if hasattr(self, '_monitor_intervals') and self._monitor_intervals:
+            logger.info(
+                f"   📊 Batch intervals: avg={avg_interval:.3f}s, "
+                f"min={self._monitor_min_interval:.3f}s, max={self._monitor_max_interval:.3f}s"
+            )
 
     def _start_multiprocess_data_worker(self):
         """マルチプロセスデータ処理ワーカーを開始"""
@@ -1294,27 +1367,21 @@ class TradeMini:
         except Exception as e:
             logger.error(f"Error logging statistics: {e}")
 
-    async def _websocket_monitor_mode(self):
-        """WebSocket監視専用モード"""
-        from websocket_monitor import WebSocketMonitor
-        
-        logger.info("🔍 Initializing WebSocket monitor...")
-        monitor = WebSocketMonitor(self.config)
-        
-        try:
-            await monitor.start_monitoring()
-        except KeyboardInterrupt:
-            logger.info("WebSocket monitoring interrupted by user")
-        finally:
-            await monitor.stop_monitoring()
-            logger.info("WebSocket monitoring stopped")
 
-    async def run(self, websocket_monitor: bool = False):
+    async def run(self):
         """メインループ実行"""
-        if websocket_monitor:
-            logger.info("🔍 Starting WebSocket monitoring mode...")
-            await self._websocket_monitor_mode()
-            return
+        # config.ymlでWebSocket+pingモードが設定されているかチェック
+        websocket_ping_mode = self.config.get('bybit.environment') == 'websocket-ping_only'
+        
+        if websocket_ping_mode:
+            logger.info("🔍 WebSocket+Ping Only Mode (configured in config.yml)")
+            logger.info("   - Data processing: DISABLED")
+            logger.info("   - Multiprocess worker: DISABLED")
+            logger.info("   - Trading: DISABLED")
+            logger.info("   - QuestDB: DISABLED")
+            logger.info("   - Only WebSocket receive + ping monitoring")
+            logger.info("=" * 60)
+        
             
         logger.info("Starting Trade Mini...")
 
@@ -1455,44 +1522,26 @@ async def main():
         print("")
         print("Usage:")
         print("  python main.py                    通常のトレーディングモード")
-        print("  python main.py --websocket-monitor WebSocket受信監視モード（-w）")
         print("  python main.py --help             このヘルプを表示（-h）")
         print("")
-        print("WebSocket監視モード:")
-        print("  - データ処理やDB保存は行わない")
-        print("  - WebSocket受信頻度とping送信のみ")
+        print("WebSocket+Ping監視モード:")
+        print("  config.yml の bybit.environment を 'websocket-ping_only' に設定")
+        print("  - 本編のMEXCクライアントを使用")
+        print("  - データ処理、戦略分析、取引実行は一切スキップ")
+        print("  - WebSocket受信頻度とping送信のみ確認")
         print("  - 受信統計を10秒ごとに表示")
-        print("  - 軽量で高速な監視が可能")
+        print("  - マルチプロセスは起動せず軽量動作")
         return
     
-    # コマンドライン引数チェック
-    websocket_monitor = "--websocket-monitor" in sys.argv or "-w" in sys.argv
-    
-    if websocket_monitor:
-        print("🔍 MEXC WebSocket Monitor Mode")
-        print("Pure WebSocket receive + ping monitoring (no data processing)")
-        print("Press Ctrl+C to stop monitoring")
-        print("=" * 50)
-    
     try:
-        if websocket_monitor:
-            # WebSocket監視モード専用（軽量化）
-            from websocket_monitor import WebSocketMonitor
-            from config import Config
-            
-            config = Config()
-            monitor = WebSocketMonitor(config)
-            await monitor.start_monitoring()
-        else:
-            # 通常のトレーディングモード
-            # マルチプロセス開始方法を設定（Dockerコンテナ対応）
-            multiprocessing.set_start_method("fork", force=True)
+        # マルチプロセス開始方法を設定（Dockerコンテナ対応）
+        multiprocessing.set_start_method("fork", force=True)
 
-            # Trade Mini インスタンス作成
-            app = TradeMini()
+        # Trade Mini インスタンス作成
+        app = TradeMini()
 
-            # 実行
-            await app.run()
+        # 実行
+        await app.run()
 
     except KeyboardInterrupt:
         print("Interrupted by user")

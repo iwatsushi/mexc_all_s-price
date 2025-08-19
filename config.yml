@@ -13,7 +13,8 @@ bybit:
     # "live" - 本番取引（実資金）
     # "demo" - 本番デモトレード（推奨）
     # "testnet" - 開発者向けテストネット
-    environment: "demo"
+    # "websocket-ping_only" - WebSocket受信+ping送信のみ（データ処理なし）
+    environment: "websocket-ping_only"
 
     # 本番取引環境（実資金）
     live:
@@ -29,6 +30,14 @@ bybit:
     testnet:
         api_url: "https://api-testnet.bybit.com"
         description: "Developer testnet environment"
+
+    # WebSocket+ping監視専用モード
+    websocket-ping_only:
+        description: "WebSocket receive + ping only mode (no data processing, no trading)"
+        disable_data_processing: true
+        disable_multiprocess: true
+        disable_trading: true
+        disable_questdb: true
 
 # 取引戦略パラメータ
 strategy:
