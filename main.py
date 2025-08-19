@@ -492,46 +492,47 @@ class TradeMini:
                         signal = None
                         
                         # 全銘柄に対してデータ分析を実行
-                        try:
-                            print(f"🔄 全銘柄分析: {symbol} (processed_count={processed_count})")
-                            
-                            # TickDataオブジェクトの作成（MEXCの実際のタイムスタンプを使用）
-                            mexc_timestamp = ticker_data.get("timestamp")
-                            if mexc_timestamp is not None and isinstance(mexc_timestamp, (int, float)):
-                                try:
-                                    # MEXCはミリ秒単位のUNIXタイムスタンプを提供
-                                    tick_timestamp = datetime.fromtimestamp(mexc_timestamp / 1000)
-                                except (ValueError, OverflowError, OSError) as e:
-                                    print(f"⚠️ Invalid timestamp for {symbol}: {mexc_timestamp} - {e}")
-                                    tick_timestamp = datetime.now()
-                            else:
-                                # フォールバック（通常は不要）
-                                tick_timestamp = datetime.now()
-                            
-                            tick = TickData(
-                                symbol=symbol,
-                                price=price_f,
-                                timestamp=tick_timestamp,
-                                volume=volume_f
-                            )
-                            
-                            # データ追加
-                            start_time = datetime.now()
-                            TradeMini._mp_data_manager.add_tick(tick)
-                            elapsed = (datetime.now() - start_time).total_seconds()
-                            
-                            print(f"✅ Data added successfully in {elapsed:.3f}s for {symbol}")
-                            
-                            # データ件数とタイムレンジの確認
-                            symbol_data = TradeMini._mp_data_manager.get_symbol_data(symbol)
-                            if symbol_data:
-                                data_count = symbol_data.get_data_count()
-                                time_range = symbol_data.get_time_range()
-                                print(f"📊 {symbol}: data_count={data_count}, time_range={time_range}")
+                        if processed_count <= 100:  # 最初の100銘柄で詳細分析をテスト
+                            try:
+                                print(f"🔄 全銘柄分析: {symbol} (processed_count={processed_count})")
                                 
-                                # 設定された時間分のデータが蓄積されているかチェック
-                                config_seconds = TradeMini._mp_config.price_comparison_seconds
-                                if time_range[0] and time_range[1]:
+                                # TickDataオブジェクトの作成（MEXCの実際のタイムスタンプを使用）
+                                mexc_timestamp = ticker_data.get("timestamp")
+                                if mexc_timestamp is not None and isinstance(mexc_timestamp, (int, float)):
+                                    try:
+                                        # MEXCはミリ秒単位のUNIXタイムスタンプを提供
+                                        tick_timestamp = datetime.fromtimestamp(mexc_timestamp / 1000)
+                                    except (ValueError, OverflowError, OSError) as e:
+                                        print(f"⚠️ Invalid timestamp for {symbol}: {mexc_timestamp} - {e}")
+                                        tick_timestamp = datetime.now()
+                                else:
+                                    # フォールバック（通常は不要）
+                                    tick_timestamp = datetime.now()
+                                
+                                tick = TickData(
+                                    symbol=symbol,
+                                    price=price_f,
+                                    timestamp=tick_timestamp,
+                                    volume=volume_f
+                                )
+                                
+                                # データ追加
+                                start_time = datetime.now()
+                                TradeMini._mp_data_manager.add_tick(tick)
+                                elapsed = (datetime.now() - start_time).total_seconds()
+                                
+                                print(f"✅ Data added successfully in {elapsed:.3f}s for {symbol}")
+                                
+                                # データ件数とタイムレンジの確認
+                                symbol_data = TradeMini._mp_data_manager.get_symbol_data(symbol)
+                                if symbol_data:
+                                    data_count = symbol_data.get_data_count()
+                                    time_range = symbol_data.get_time_range()
+                                    print(f"📊 {symbol}: data_count={data_count}, time_range={time_range}")
+                                
+                                    # 設定された時間分のデータが蓄積されているかチェック
+                                    config_seconds = TradeMini._mp_config.price_comparison_seconds
+                                    if time_range[0] and time_range[1]:
                                         try:
                                             # datetime型であることを確認してから計算
                                             if isinstance(time_range[0], datetime) and isinstance(time_range[1], datetime):
@@ -602,10 +603,10 @@ class TradeMini:
                                                 except Exception as e:
                                                     print(f"❌ SHORT POSITION ERROR: {symbol} - {e}")
                         
-                        except Exception as data_error:
-                            print(f"❌ 全銘柄分析失敗 for {symbol}: {data_error}")
-                            import traceback
-                            print(f"Error traceback: {traceback.format_exc()}")
+                            except Exception as data_error:
+                                print(f"❌ 全銘柄分析失敗 for {symbol}: {data_error}")
+                                import traceback
+                                print(f"Error traceback: {traceback.format_exc()}")
                         
                         # 🧪 強制テストシグナル（特定銘柄で確実にシグナル生成をテスト）
                         if symbol == "CSKY_USDT" and processed_count == 1:
