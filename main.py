@@ -554,19 +554,28 @@ class TradeMini:
                                         
                                         # N秒前の価格と時刻（詳細取得）
                                         past_price = symbol_data.get_price_n_seconds_ago(config_seconds)
-                                        past_timestamp = tick_timestamp - timedelta(seconds=config_seconds) if tick_timestamp else None
+                                        # tick_timestampがdatetime型であることを確認してからtimedelta演算
+                                        if tick_timestamp and isinstance(tick_timestamp, datetime):
+                                            past_timestamp = tick_timestamp - timedelta(seconds=config_seconds)
+                                        else:
+                                            past_timestamp = None
                                         
                                         # 価格変動率を計算
                                         price_change = symbol_data.get_price_change_percent(config_seconds)
                                         
                                         # 詳細表示
-                                        if price_change is not None and past_price is not None:
-                                            print(f"📈 {symbol}: 変動率={price_change:.4f}% over {config_seconds}s")
-                                            print(f"   現在: {current_price:.8f} @ {current_timestamp.strftime('%H:%M:%S.%f')[:-3] if current_timestamp else 'N/A'}")
-                                            print(f"   {config_seconds}秒前: {past_price:.8f} @ {past_timestamp.strftime('%H:%M:%S.%f')[:-3] if past_timestamp else 'N/A'}")
-                                            print(f"   差額: {current_price - past_price:.8f} ({'+' if price_change > 0 else ''}{price_change:.4f}%)")
+                                        if price_change is not None and past_price is not None and current_price is not None:
+                                            try:
+                                                # 型安全性を確保して差額計算
+                                                price_diff = float(current_price) - float(past_price)
+                                                print(f"📈 {symbol}: 変動率={price_change:.4f}% over {config_seconds}s")
+                                                print(f"   現在: {current_price:.8f} @ {current_timestamp.strftime('%H:%M:%S.%f')[:-3] if current_timestamp and isinstance(current_timestamp, datetime) else 'N/A'}")
+                                                print(f"   {config_seconds}秒前: {past_price:.8f} @ {past_timestamp.strftime('%H:%M:%S.%f')[:-3] if past_timestamp and isinstance(past_timestamp, datetime) else 'N/A'}")
+                                                print(f"   差額: {price_diff:.8f} ({'+' if price_change > 0 else ''}{price_change:.4f}%)")
+                                            except (TypeError, ValueError) as calc_error:
+                                                print(f"📈 {symbol}: 価格計算エラー ({calc_error}) current={current_price}, past={past_price}")
                                         else:
-                                            print(f"📈 {symbol}: 変動率計算不可 (current={current_price}, past={past_price})")
+                                            print(f"📈 {symbol}: 変動率計算不可 (current={current_price}, past={past_price}, change={price_change})")
                                         
                                         # 設定値による閾値チェック
                                         long_threshold = TradeMini._mp_config.long_threshold_percent
