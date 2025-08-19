@@ -272,7 +272,7 @@ class TradeMini:
     ):
         """独立プロセスでのデータ処理（GIL完全回避）"""
         import time
-        from datetime import datetime
+        from datetime import datetime, timedelta
 
         # プロセス独立ログ設定
         from loguru import logger
@@ -488,77 +488,50 @@ class TradeMini:
                         if processed_count <= 20:
                             logger.info(f"🔍 Sample symbol #{processed_count}: {symbol}")
                         
-                        # 🎯 戦略分析：MEXCの実際の銘柄形式が確認できたため、対象銘柄を設定
-                        # QuestDBに確認したところ、BTC_USDT形式とBTCUSDT形式の両方が存在
-                        # 高変動銘柄を追加（CSKY_USDT: 21.97%変動、ALU_USDT: 10.76%変動）
-                        major_symbols = {
-                            # メジャー銘柄（両形式をサポート）
-                            "BTCUSDT", "BTC_USDT", "ETHUSDT", "ETH_USDT", 
-                            "ADAUSDT", "ADA_USDT", "SOLUSDT", "SOL_USDT", 
-                            "DOGEUSDT", "DOGE_USDT",
-                            # より変動しやすい銘柄を追加
-                            "PEPEUSDT", "PEPE_USDT", "SHIBUSDT", "SHIB_USDT", 
-                            "FLOKIUSDT", "FLOKI_USDT", "BONKUSDT", "BONK_USDT", 
-                            "1000RATSUSDT", "1000RATS_USDT",
-                            # 追加の変動銘柄
-                            "JUPUSDT", "JUP_USDT",
-                            # 高変動テスト銘柄（QuestDBで21%+の変動を確認）
-                            "CSKY_USDT", "ALU_USDT", "BOSS_USDT", "CLANKER_USDT", 
-                            "MEMEFI_USDT", "ASR_USDT", "MYX_USDT", "BIO_USDT"
-                        }
-                        
-                        # 🔍 戦略分析開始の確認（デバッグ用）
-                        if processed_count == 1:  # 最初の銘柄で必ずログ出力
-                            logger.info(f"🔍 First symbol processed: {symbol} (checking if in major_symbols)")
-                        
-                        # 🔄 Phase 2: 制御された戦略分析機能の復元
+                        # 🔄 全銘柄を戦略分析対象に変更（制限削除）
                         signal = None
                         
-                        # Phase 2: 制御されたデータ追加と価格変動率チェック（複数の主要銘柄でテスト）
-                        test_symbols = ["SOL_USDT", "BTC_USDT", "ETH_USDT", "KAITO_USDT", "UNI_USDT"]
-                        if symbol in test_symbols:
-                            print(f"🔍 Phase 2: Found test symbol {symbol}, processed_count={processed_count}")
-                        if symbol in test_symbols and processed_count <= 50:  # 各銘柄50回まで（テストのため）
-                            try:
-                                print(f"🔄 Phase 2: Data analysis test for {symbol} (attempt {processed_count})")
-                                
-                                # TickDataオブジェクトの作成（MEXCの実際のタイムスタンプを使用）
-                                mexc_timestamp = ticker_data.get("timestamp")
-                                if mexc_timestamp is not None and isinstance(mexc_timestamp, (int, float)):
-                                    try:
-                                        # MEXCはミリ秒単位のUNIXタイムスタンプを提供
-                                        tick_timestamp = datetime.fromtimestamp(mexc_timestamp / 1000)
-                                    except (ValueError, OverflowError, OSError) as e:
-                                        print(f"⚠️ Invalid timestamp for {symbol}: {mexc_timestamp} - {e}")
-                                        tick_timestamp = datetime.now()
-                                else:
-                                    # フォールバック（通常は不要）
+                        # 全銘柄に対してデータ分析を実行
+                        try:
+                            print(f"🔄 全銘柄分析: {symbol} (processed_count={processed_count})")
+                            
+                            # TickDataオブジェクトの作成（MEXCの実際のタイムスタンプを使用）
+                            mexc_timestamp = ticker_data.get("timestamp")
+                            if mexc_timestamp is not None and isinstance(mexc_timestamp, (int, float)):
+                                try:
+                                    # MEXCはミリ秒単位のUNIXタイムスタンプを提供
+                                    tick_timestamp = datetime.fromtimestamp(mexc_timestamp / 1000)
+                                except (ValueError, OverflowError, OSError) as e:
+                                    print(f"⚠️ Invalid timestamp for {symbol}: {mexc_timestamp} - {e}")
                                     tick_timestamp = datetime.now()
+                            else:
+                                # フォールバック（通常は不要）
+                                tick_timestamp = datetime.now()
+                            
+                            tick = TickData(
+                                symbol=symbol,
+                                price=price_f,
+                                timestamp=tick_timestamp,
+                                volume=volume_f
+                            )
+                            
+                            # データ追加
+                            start_time = datetime.now()
+                            TradeMini._mp_data_manager.add_tick(tick)
+                            elapsed = (datetime.now() - start_time).total_seconds()
+                            
+                            print(f"✅ Data added successfully in {elapsed:.3f}s for {symbol}")
+                            
+                            # データ件数とタイムレンジの確認
+                            symbol_data = TradeMini._mp_data_manager.get_symbol_data(symbol)
+                            if symbol_data:
+                                data_count = symbol_data.get_data_count()
+                                time_range = symbol_data.get_time_range()
+                                print(f"📊 {symbol}: data_count={data_count}, time_range={time_range}")
                                 
-                                tick = TickData(
-                                    symbol=symbol,
-                                    price=price_f,
-                                    timestamp=tick_timestamp,
-                                    volume=volume_f
-                                )
-                                
-                                # データ追加
-                                start_time = datetime.now()
-                                TradeMini._mp_data_manager.add_tick(tick)
-                                elapsed = (datetime.now() - start_time).total_seconds()
-                                
-                                print(f"✅ Data added successfully in {elapsed:.3f}s for {symbol}")
-                                
-                                # データ件数とタイムレンジの確認
-                                symbol_data = TradeMini._mp_data_manager.get_symbol_data(symbol)
-                                if symbol_data:
-                                    data_count = symbol_data.get_data_count()
-                                    time_range = symbol_data.get_time_range()
-                                    print(f"📊 {symbol}: data_count={data_count}, time_range={time_range}")
-                                    
-                                    # 設定された時間分のデータが蓄積されているかチェック
-                                    config_seconds = TradeMini._mp_config.price_comparison_seconds
-                                    if time_range[0] and time_range[1]:
+                                # 設定された時間分のデータが蓄積されているかチェック
+                                config_seconds = TradeMini._mp_config.price_comparison_seconds
+                                if time_range[0] and time_range[1]:
                                         try:
                                             # datetime型であることを確認してから計算
                                             if isinstance(time_range[0], datetime) and isinstance(time_range[1], datetime):
@@ -574,8 +547,25 @@ class TradeMini:
                                         has_sufficient_data = False
                                     
                                     if has_sufficient_data and data_count >= 2:
+                                        # 現在価格と時刻
+                                        current_price = symbol_data.get_latest_price()
+                                        current_timestamp = tick_timestamp
+                                        
+                                        # N秒前の価格と時刻（詳細取得）
+                                        past_price = symbol_data.get_price_n_seconds_ago(config_seconds)
+                                        past_timestamp = tick_timestamp - timedelta(seconds=config_seconds) if tick_timestamp else None
+                                        
+                                        # 価格変動率を計算
                                         price_change = symbol_data.get_price_change_percent(config_seconds)
-                                        print(f"📈 {symbol}: price_change={price_change}% over {config_seconds}s")
+                                        
+                                        # 詳細表示
+                                        if price_change is not None and past_price is not None:
+                                            print(f"📈 {symbol}: 変動率={price_change:.4f}% over {config_seconds}s")
+                                            print(f"   現在: {current_price:.8f} @ {current_timestamp.strftime('%H:%M:%S.%f')[:-3] if current_timestamp else 'N/A'}")
+                                            print(f"   {config_seconds}秒前: {past_price:.8f} @ {past_timestamp.strftime('%H:%M:%S.%f')[:-3] if past_timestamp else 'N/A'}")
+                                            print(f"   差額: {current_price - past_price:.8f} ({'+' if price_change > 0 else ''}{price_change:.4f}%)")
+                                        else:
+                                            print(f"📈 {symbol}: 変動率計算不可 (current={current_price}, past={past_price})")
                                         
                                         # 設定値による閾値チェック
                                         long_threshold = TradeMini._mp_config.long_threshold_percent
@@ -611,52 +601,52 @@ class TradeMini:
                                                         print(f"❌ SHORT POSITION FAILED: {symbol} - {message}")
                                                 except Exception as e:
                                                     print(f"❌ SHORT POSITION ERROR: {symbol} - {e}")
-                                
-                            except Exception as data_error:
-                                print(f"❌ Phase 2: Data analysis failed for {symbol}: {data_error}")
-                                import traceback
-                                print(f"Error traceback: {traceback.format_exc()}")
+                        
+                        except Exception as data_error:
+                            print(f"❌ 全銘柄分析失敗 for {symbol}: {data_error}")
+                            import traceback
+                            print(f"Error traceback: {traceback.format_exc()}")
+                        
+                        # 🧪 強制テストシグナル（特定銘柄で確実にシグナル生成をテスト）
+                        if symbol == "CSKY_USDT" and processed_count == 1:
+                            signals_count += 1
+                            logger.info(f"🧪 FORCED TEST SIGNAL: {symbol} @ {price_f} (Testing signal generation)")
+                        
+                        if signal and signal.signal_type != SignalType.NONE:
+                            signals_count += 1
+                            logger.info(
+                                f"🚨 SIGNAL DETECTED: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f} ({signal.reason})"
+                            )
                             
-                            # 🧪 強制テストシグナル（特定銘柄で確実にシグナル生成をテスト）
-                            if symbol == "CSKY_USDT" and processed_count == 1:
-                                signals_count += 1
-                                logger.info(f"🧪 FORCED TEST SIGNAL: {symbol} @ {price_f} (Testing signal generation)")
-                            
-                            if signal and signal.signal_type != SignalType.NONE:
-                                signals_count += 1
-                                logger.info(
-                                    f"🚨 SIGNAL DETECTED: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f} ({signal.reason})"
-                                )
-                                
-                                # 実際の注文処理を実行
-                                try:
-                                    if signal.signal_type in [SignalType.LONG, SignalType.SHORT]:
-                                        # 新規オープン注文
-                                        side = "LONG" if signal.signal_type == SignalType.LONG else "SHORT"
-                                        success, message, position = TradeMini._mp_position_manager.open_position(
-                                            symbol, side, signal.price, signal.timestamp
-                                        )
-                                        
-                                        if success and position:
-                                            logger.info(f"✅ POSITION OPENED: {symbol} {side} @ {signal.price:.6f}")
-                                        else:
-                                            logger.error(f"❌ POSITION OPEN FAILED: {symbol} {side} - {message}")
+                            # 実際の注文処理を実行
+                            try:
+                                if signal.signal_type in [SignalType.LONG, SignalType.SHORT]:
+                                    # 新規オープン注文
+                                    side = "LONG" if signal.signal_type == SignalType.LONG else "SHORT"
+                                    success, message, position = TradeMini._mp_position_manager.open_position(
+                                        symbol, side, signal.price, signal.timestamp
+                                    )
                                     
-                                    elif signal.signal_type == SignalType.CLOSE:
-                                        # ポジションクローズ注文
-                                        success, message, position = TradeMini._mp_position_manager.close_position(
-                                            symbol, signal.reason
-                                        )
-                                        
-                                        if success and position:
-                                            logger.info(f"✅ POSITION CLOSED: {symbol} @ {signal.price:.6f} - {signal.reason}")
-                                        else:
-                                            logger.error(f"❌ POSITION CLOSE FAILED: {symbol} - {message}")
+                                    if success and position:
+                                        logger.info(f"✅ POSITION OPENED: {symbol} {side} @ {signal.price:.6f}")
+                                    else:
+                                        logger.error(f"❌ POSITION OPEN FAILED: {symbol} {side} - {message}")
                                 
-                                except Exception as order_error:
-                                    logger.error(f"❌ ORDER PROCESSING ERROR: {symbol} {signal.signal_type.value} - {order_error}")
-                                    import traceback
-                                    logger.error(f"Order error traceback: {traceback.format_exc()}")
+                                elif signal.signal_type == SignalType.CLOSE:
+                                    # ポジションクローズ注文
+                                    success, message, position = TradeMini._mp_position_manager.close_position(
+                                        symbol, signal.reason
+                                    )
+                                    
+                                    if success and position:
+                                        logger.info(f"✅ POSITION CLOSED: {symbol} @ {signal.price:.6f} - {signal.reason}")
+                                    else:
+                                        logger.error(f"❌ POSITION CLOSE FAILED: {symbol} - {message}")
+                            
+                            except Exception as order_error:
+                                logger.error(f"❌ ORDER PROCESSING ERROR: {symbol} {signal.signal_type.value} - {order_error}")
+                                import traceback
+                                logger.error(f"Order error traceback: {traceback.format_exc()}")
 
                     except (ValueError, TypeError):
                         continue
