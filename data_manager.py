@@ -101,21 +101,36 @@ class SymbolTickData:
             if not self.latest_tick:
                 return None
 
-            target_time = self.latest_tick.timestamp - timedelta(seconds=n_seconds)
+            # datetime型であることを確認
+            if not isinstance(self.latest_tick.timestamp, datetime):
+                logger.warning(f"{self.symbol}: Invalid timestamp type: {type(self.latest_tick.timestamp)}")
+                return None
+
+            try:
+                target_time = self.latest_tick.timestamp - timedelta(seconds=n_seconds)
+            except (TypeError, AttributeError) as e:
+                logger.warning(f"{self.symbol}: Timestamp calculation error: {e}")
+                return None
 
             # 最も近い過去の価格を探す
             closest_tick = None
             min_time_diff = float("inf")
 
             for tick in reversed(self.tick_data):  # 新しいものから検索
-                time_diff = abs((tick.timestamp - target_time).total_seconds())
-                if time_diff < min_time_diff:
-                    min_time_diff = time_diff
-                    closest_tick = tick
+                if not isinstance(tick.timestamp, datetime):
+                    continue
+                
+                try:
+                    time_diff = abs((tick.timestamp - target_time).total_seconds())
+                    if time_diff < min_time_diff:
+                        min_time_diff = time_diff
+                        closest_tick = tick
 
-                # target_timeより古くなったら検索終了
-                if tick.timestamp < target_time:
-                    break
+                    # target_timeより古くなったら検索終了
+                    if tick.timestamp < target_time:
+                        break
+                except (TypeError, AttributeError):
+                    continue
 
             return closest_tick.price if closest_tick else None
 

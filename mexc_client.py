@@ -352,7 +352,11 @@ class MEXCWebSocketClient:
                     # MEXCの実際のタイムスタンプを使用（ミリ秒単位）
                     mexc_timestamp = ticker.get("timestamp")
                     if mexc_timestamp is not None and isinstance(mexc_timestamp, (int, float)):
-                        tick_timestamp = datetime.fromtimestamp(mexc_timestamp / 1000)
+                        try:
+                            tick_timestamp = datetime.fromtimestamp(mexc_timestamp / 1000)
+                        except (ValueError, OverflowError, OSError) as e:
+                            logger.warning(f"Invalid timestamp for {symbol}: {mexc_timestamp} - {e}")
+                            tick_timestamp = datetime.now()
                     else:
                         # フォールバック（通常は不要だが安全のため）
                         tick_timestamp = datetime.now()

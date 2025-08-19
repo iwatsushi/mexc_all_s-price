@@ -525,8 +525,12 @@ class TradeMini:
                                 # TickDataオブジェクトの作成（MEXCの実際のタイムスタンプを使用）
                                 mexc_timestamp = ticker_data.get("timestamp")
                                 if mexc_timestamp is not None and isinstance(mexc_timestamp, (int, float)):
-                                    # MEXCはミリ秒単位のUNIXタイムスタンプを提供
-                                    tick_timestamp = datetime.fromtimestamp(mexc_timestamp / 1000)
+                                    try:
+                                        # MEXCはミリ秒単位のUNIXタイムスタンプを提供
+                                        tick_timestamp = datetime.fromtimestamp(mexc_timestamp / 1000)
+                                    except (ValueError, OverflowError, OSError) as e:
+                                        print(f"⚠️ Invalid timestamp for {symbol}: {mexc_timestamp} - {e}")
+                                        tick_timestamp = datetime.now()
                                 else:
                                     # フォールバック（通常は不要）
                                     tick_timestamp = datetime.now()
@@ -555,8 +559,17 @@ class TradeMini:
                                     # 設定された時間分のデータが蓄積されているかチェック
                                     config_seconds = TradeMini._mp_config.price_comparison_seconds
                                     if time_range[0] and time_range[1]:
-                                        time_span = (time_range[1] - time_range[0]).total_seconds()
-                                        has_sufficient_data = time_span >= config_seconds
+                                        try:
+                                            # datetime型であることを確認してから計算
+                                            if isinstance(time_range[0], datetime) and isinstance(time_range[1], datetime):
+                                                time_span = (time_range[1] - time_range[0]).total_seconds()
+                                                has_sufficient_data = time_span >= config_seconds
+                                            else:
+                                                print(f"⚠️ Invalid time_range types for {symbol}: {type(time_range[0])}, {type(time_range[1])}")
+                                                has_sufficient_data = False
+                                        except Exception as time_error:
+                                            print(f"⚠️ Time calculation error for {symbol}: {time_error}")
+                                            has_sufficient_data = False
                                     else:
                                         has_sufficient_data = False
                                     
