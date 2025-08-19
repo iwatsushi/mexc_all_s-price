@@ -1294,8 +1294,28 @@ class TradeMini:
         except Exception as e:
             logger.error(f"Error logging statistics: {e}")
 
-    async def run(self):
+    async def _websocket_monitor_mode(self):
+        """WebSocket監視専用モード"""
+        from websocket_monitor import WebSocketMonitor
+        
+        logger.info("🔍 Initializing WebSocket monitor...")
+        monitor = WebSocketMonitor(self.config)
+        
+        try:
+            await monitor.start_monitoring()
+        except KeyboardInterrupt:
+            logger.info("WebSocket monitoring interrupted by user")
+        finally:
+            await monitor.stop_monitoring()
+            logger.info("WebSocket monitoring stopped")
+
+    async def run(self, websocket_monitor: bool = False):
         """メインループ実行"""
+        if websocket_monitor:
+            logger.info("🔍 Starting WebSocket monitoring mode...")
+            await self._websocket_monitor_mode()
+            return
+            
         logger.info("Starting Trade Mini...")
 
         try:
@@ -1427,15 +1447,52 @@ class TradeMini:
 
 async def main():
     """メイン関数"""
+    import sys
+    
+    # ヘルプ表示
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print("🚀 Trade Mini - MEXC/Bybit自動取引システム")
+        print("")
+        print("Usage:")
+        print("  python main.py                    通常のトレーディングモード")
+        print("  python main.py --websocket-monitor WebSocket受信監視モード（-w）")
+        print("  python main.py --help             このヘルプを表示（-h）")
+        print("")
+        print("WebSocket監視モード:")
+        print("  - データ処理やDB保存は行わない")
+        print("  - WebSocket受信頻度とping送信のみ")
+        print("  - 受信統計を10秒ごとに表示")
+        print("  - 軽量で高速な監視が可能")
+        return
+    
+    # コマンドライン引数チェック
+    websocket_monitor = "--websocket-monitor" in sys.argv or "-w" in sys.argv
+    
+    if websocket_monitor:
+        print("🔍 MEXC WebSocket Monitor Mode")
+        print("Pure WebSocket receive + ping monitoring (no data processing)")
+        print("Press Ctrl+C to stop monitoring")
+        print("=" * 50)
+    
     try:
-        # マルチプロセス開始方法を設定（Dockerコンテナ対応）
-        multiprocessing.set_start_method("fork", force=True)
+        if websocket_monitor:
+            # WebSocket監視モード専用（軽量化）
+            from websocket_monitor import WebSocketMonitor
+            from config import Config
+            
+            config = Config()
+            monitor = WebSocketMonitor(config)
+            await monitor.start_monitoring()
+        else:
+            # 通常のトレーディングモード
+            # マルチプロセス開始方法を設定（Dockerコンテナ対応）
+            multiprocessing.set_start_method("fork", force=True)
 
-        # Trade Mini インスタンス作成
-        app = TradeMini()
+            # Trade Mini インスタンス作成
+            app = TradeMini()
 
-        # 実行
-        await app.run()
+            # 実行
+            await app.run()
 
     except KeyboardInterrupt:
         print("Interrupted by user")
