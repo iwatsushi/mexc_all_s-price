@@ -10,10 +10,10 @@ import json
 import logging
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
-from collections import deque
 
 import requests
 import websockets
@@ -76,10 +76,10 @@ class MEXCWebSocketClient:
         self._websocket = None
         self._reconnect_attempts = 0
         self._max_reconnect_attempts = 5
-        
+
         # デバッグフラグ
         self._debug_interval_stats = False
-        
+
         # ping管理（受信ループ内で実行）
         self._last_ping_time = 0
         self._ping_interval = 15  # 15秒間隔（MEXC推奨の10-20秒の中間値）
@@ -177,7 +177,7 @@ class MEXCWebSocketClient:
         async with websockets.connect(
             self.ws_url,
             ping_interval=None,  # WebSocketレベルのpingは無効化
-            max_size=None,       # フレームサイズ制限を解除
+            max_size=None,  # フレームサイズ制限を解除
             open_timeout=20,
             close_timeout=5,
         ) as websocket:
@@ -201,7 +201,7 @@ class MEXCWebSocketClient:
             # メッセージ受信ループ（デバッグスクリプトと同じタイムアウト方式を採用）
             last_recv = time.monotonic()  # デバッグスクリプトと同じ単調時間を使用
             message_count = 0
-            
+
             # 📊 受信間隔測定用（ChatGPT5提案）
             last_ticker_time = None
             ticker_intervals = []
@@ -218,18 +218,22 @@ class MEXCWebSocketClient:
                     message_count += 1
 
                     # 🚀 ChatGPT5提案: 受信直後は生データをキューに投入のみ
-                    logger.debug(f"💬 Raw message #{message_count} received: {len(raw_message)} chars")
-                    
+                    logger.debug(
+                        f"💬 Raw message #{message_count} received: {len(raw_message)} chars"
+                    )
+
                     # 📊 受信間隔測定（デバッグ時のみ）
                     if self._debug_interval_stats:
                         if last_ticker_time is not None:
                             interval = rx_time - last_ticker_time
                             ticker_intervals.append(interval)
-                            
+
                             # 統計ログ（10回毎）
                             if len(ticker_intervals) % 10 == 0:
                                 recent_intervals = ticker_intervals[-10:]
-                                avg_interval = sum(recent_intervals) / len(recent_intervals)
+                                avg_interval = sum(recent_intervals) / len(
+                                    recent_intervals
+                                )
                                 min_interval = min(recent_intervals)
                                 max_interval = max(recent_intervals)
                                 logger.info(
@@ -237,13 +241,15 @@ class MEXCWebSocketClient:
                                     f"min={min_interval:.3f}s, max={max_interval:.3f}s"
                                 )
                         last_ticker_time = rx_time
-                    
+
                     # 🚀 超軽量処理：生データを直接解凍してコールバック呼び出し
                     if self.batch_callback:
                         self._process_ticker_batch_safe(raw_message)
                     else:
-                        logger.debug(f"⚠️ No batch callback configured, dropping message #{message_count}")
-                    
+                        logger.debug(
+                            f"⚠️ No batch callback configured, dropping message #{message_count}"
+                        )
+
                     # 💓 軽量ping送信チェック（受信イベント内で実行）
                     if rx_time - self._last_ping_time >= self._ping_interval:
                         try:
@@ -251,7 +257,7 @@ class MEXCWebSocketClient:
                             ping_json = json.dumps(ping_msg)
                             await websocket.send(ping_json)
                             self._last_ping_time = rx_time
-                            logger.info(f"💓 MEXC ping sent (inline): {ping_json}")
+                            # logger.info(f"💓 MEXC ping sent (inline): {ping_json}")
                         except Exception as e:
                             logger.warning(f"💓 Failed to send ping: {e}")
 
@@ -264,13 +270,13 @@ class MEXCWebSocketClient:
                         )
                         # 再接続をトリガーするために例外を発生
                         raise websockets.exceptions.ConnectionClosed(None, None)
-                    elif since > 2:  # 2秒以上でDEBUGログ
+                    elif since > 4:  # 4秒以上でDEBUGログ
                         logger.info(
                             f"⏰ WebSocket timeout check: {since:.1f}s since last message (total_messages: {message_count})"
                         )
-                    
+
                     # ping専用プロセスが接続維持を担当するため、ここでは何もしない
-                    
+
                     continue  # タイムアウト時は継続
 
                 except json.JSONDecodeError as e:
@@ -298,14 +304,16 @@ class MEXCWebSocketClient:
                     # gzip圧縮されたデータを解凍
                     decompressed = gzip.decompress(raw_message)
                     data = json.loads(decompressed)
-                    logger.debug(f"📦 Decompressed {len(raw_message)} → {len(decompressed)} bytes")
+                    logger.debug(
+                        f"📦 Decompressed {len(raw_message)} → {len(decompressed)} bytes"
+                    )
                 else:
                     # 非圧縮データ
                     data = json.loads(raw_message)
             except (gzip.BadGzipFile, json.JSONDecodeError) as e:
                 logger.warning(f"Failed to decode message: {e}")
                 return
-            
+
             # チャンネル判定：ティッカーデータのみ処理
             if data.get("channel") == "push.tickers" and "data" in data:
                 tickers = data["data"]
@@ -314,7 +322,7 @@ class MEXCWebSocketClient:
                 return
             elif data.get("channel") == "pong":
                 pong_data = data.get("data", "unknown")
-                logger.info(f"💓 Received pong from server: {pong_data}")
+                # logger.info(f"💓 Received pong from server: {pong_data}")
                 return
             else:
                 logger.debug(f"🔍 Unhandled channel: {data.get('channel', 'unknown')}")
@@ -351,16 +359,22 @@ class MEXCWebSocketClient:
                 if symbol and price > 0:
                     # MEXCの実際のタイムスタンプを使用（ミリ秒単位）
                     mexc_timestamp = ticker.get("timestamp")
-                    if mexc_timestamp is not None and isinstance(mexc_timestamp, (int, float)):
+                    if mexc_timestamp is not None and isinstance(
+                        mexc_timestamp, (int, float)
+                    ):
                         try:
-                            tick_timestamp = datetime.fromtimestamp(mexc_timestamp / 1000)
+                            tick_timestamp = datetime.fromtimestamp(
+                                mexc_timestamp / 1000
+                            )
                         except (ValueError, OverflowError, OSError) as e:
-                            logger.warning(f"Invalid timestamp for {symbol}: {mexc_timestamp} - {e}")
+                            logger.warning(
+                                f"Invalid timestamp for {symbol}: {mexc_timestamp} - {e}"
+                            )
                             tick_timestamp = datetime.now()
                     else:
                         # フォールバック（通常は不要だが安全のため）
                         tick_timestamp = datetime.now()
-                    
+
                     tick = TickData(
                         symbol=symbol,
                         price=price,
@@ -384,8 +398,6 @@ class MEXCWebSocketClient:
         """従来のティッカーデータ処理（互換性維持）"""
         # 新しい安全な処理に移譲
         self._process_ticker_data_safe(tickers)
-
-
 
 
 # MEXCClientとしてWebSocket版を使用
