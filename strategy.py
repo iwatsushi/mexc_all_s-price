@@ -498,3 +498,142 @@ class TradingStrategy:
             logger.error(f"Error logging comprehensive statistics: {e}")
             import traceback
             logger.debug(f"Statistics error traceback: {traceback.format_exc()}")
+
+    def process_tick_and_execute_trades(self, tick: TickData) -> bool:
+        """
+        ティックデータを処理して取引を実行
+        
+        Args:
+            tick: ティックデータ
+            
+        Returns:
+            取引が実行されたかどうか
+        """
+        try:
+            # 戦略分析してシグナル生成
+            signal = self.analyze_tick(tick)
+            
+            if signal.signal_type == SignalType.NONE:
+                return False
+                
+            # シグナルに基づいて取引実行
+            return self._execute_trade_from_signal(signal)
+            
+        except Exception as e:
+            logger.error(f"Error processing tick for {tick.symbol}: {e}")
+            return False
+
+    def _execute_trade_from_signal(self, signal: TradingSignal) -> bool:
+        """
+        シグナルに基づいて取引を実行
+        
+        Args:
+            signal: 取引シグナル
+            
+        Returns:
+            取引が実行されたかどうか
+        """
+        try:
+            if signal.signal_type == SignalType.LONG:
+                return self._execute_long_position(signal)
+            elif signal.signal_type == SignalType.SHORT:
+                return self._execute_short_position(signal)
+            elif signal.signal_type == SignalType.CLOSE:
+                return self._execute_close_position(signal)
+            else:
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error executing trade from signal for {signal.symbol}: {e}")
+            return False
+
+    def _execute_long_position(self, signal: TradingSignal) -> bool:
+        """ロングポジションを開く"""
+        try:
+            logger.info(f"🔥 LONG THRESHOLD REACHED: {signal.symbol} change={signal.reason}")
+            
+            if self.position_manager is None:
+                logger.warning(f"⚠️ POSITION MANAGER DISABLED: {signal.symbol} LONG signal ignored")
+                return False
+                
+            # datetime型のタイムスタンプに変換（ナノ秒から）
+            entry_time = signal.timestamp if isinstance(signal.timestamp, datetime) else datetime.now()
+            
+            success, message, position = self.position_manager.open_position(
+                signal.symbol,
+                "LONG", 
+                signal.price,
+                entry_time
+            )
+            
+            if success:
+                logger.info(f"✅ LONG POSITION OPENED: {signal.symbol} @ {signal.price}")
+                # 戦略側でもポジション追跡開始
+                self.add_position(signal.symbol, "LONG", signal.price, 1.0, entry_time)
+                return True
+            else:
+                logger.error(f"❌ LONG POSITION FAILED: {signal.symbol} - {message}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ LONG POSITION ERROR: {signal.symbol} - {e}")
+            return False
+
+    def _execute_short_position(self, signal: TradingSignal) -> bool:
+        """ショートポジションを開く"""
+        try:
+            logger.info(f"🔥 SHORT THRESHOLD REACHED: {signal.symbol} change={signal.reason}")
+            
+            if self.position_manager is None:
+                logger.warning(f"⚠️ POSITION MANAGER DISABLED: {signal.symbol} SHORT signal ignored")
+                return False
+                
+            # datetime型のタイムスタンプに変換（ナノ秒から）
+            entry_time = signal.timestamp if isinstance(signal.timestamp, datetime) else datetime.now()
+            
+            success, message, position = self.position_manager.open_position(
+                signal.symbol,
+                "SHORT",
+                signal.price,
+                entry_time
+            )
+            
+            if success:
+                logger.info(f"✅ SHORT POSITION OPENED: {signal.symbol} @ {signal.price}")
+                # 戦略側でもポジション追跡開始
+                self.add_position(signal.symbol, "SHORT", signal.price, 1.0, entry_time)
+                return True
+            else:
+                logger.error(f"❌ SHORT POSITION FAILED: {signal.symbol} - {message}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ SHORT POSITION ERROR: {signal.symbol} - {e}")
+            return False
+
+    def _execute_close_position(self, signal: TradingSignal) -> bool:
+        """ポジションを決済"""
+        try:
+            logger.info(f"🔥 CLOSE SIGNAL: {signal.symbol} reason={signal.reason}")
+            
+            if self.position_manager is None:
+                logger.warning(f"⚠️ POSITION MANAGER DISABLED: {signal.symbol} CLOSE signal ignored")
+                return False
+                
+            success, message, position = self.position_manager.close_position(
+                signal.symbol,
+                signal.reason
+            )
+            
+            if success:
+                logger.info(f"✅ POSITION CLOSED: {signal.symbol} @ {signal.price}")
+                # 戦略側でもポジション追跡終了
+                self.remove_position(signal.symbol)
+                return True
+            else:
+                logger.error(f"❌ CLOSE POSITION FAILED: {signal.symbol} - {message}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ CLOSE POSITION ERROR: {signal.symbol} - {e}")
+            return False

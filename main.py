@@ -488,11 +488,12 @@ class TradeMini:
             print("✅ DataManager initialized", flush=True)
             logger.info("✅ DataManager initialized")
 
+            # TradingStrategy初期化（PositionManagerを後で再設定）
             TradeMini._mp_strategy = TradingStrategy(
                 TradeMini._mp_config, TradeMini._mp_data_manager
             )
-            print("✅ TradingStrategy initialized", flush=True)
-            logger.info("✅ TradingStrategy initialized")
+            print("✅ TradingStrategy (initial) initialized", flush=True)
+            logger.info("✅ TradingStrategy (initial) initialized")
 
             # マルチプロセス用のMEXCClient初期化（PositionManager用）
             from mexc_client import MEXCWebSocketClient
@@ -529,6 +530,12 @@ class TradeMini:
             )
             print("✅ PositionManager initialized for multiprocess", flush=True)
             logger.info("✅ PositionManager initialized for multiprocess")
+
+            # PositionManagerが初期化されたのでstrategyに参照を設定
+            TradeMini._mp_strategy.position_manager = TradeMini._mp_position_manager
+            print("✅ Strategy configured with PositionManager", flush=True)
+            logger.info("✅ Strategy configured with PositionManager")
+
             print(
                 "✅ Multi-process components initialization completed successfully",
                 flush=True,
@@ -676,176 +683,27 @@ class TradeMini:
                                         f"📊 {symbol}: data_count={data_count}, time_range={time_range}"
                                     )
 
-                                    # 設定された時間分のデータが蓄積されているかチェック
-                                    config_seconds_raw = TradeMini._mp_config.price_comparison_seconds
-                                    # config_secondsの型安全性を確保
-                                    if isinstance(config_seconds_raw, (int, float)):
-                                        config_seconds = float(config_seconds_raw)
-                                    else:
-                                        print(f"⚠️ Invalid config_seconds type: {type(config_seconds_raw)}, using default 10")
-                                        config_seconds = 10.0
-                                    if time_range[0] and time_range[1]:
+                                    # 戦略エンジンに処理を委任
+                                    if TradeMini._mp_strategy is not None:
                                         try:
-                                            # int型（ナノ秒）であることを確認してから計算
-                                            if isinstance(
-                                                time_range[0], int
-                                            ) and isinstance(time_range[1], int):
-                                                # ナノ秒の差を秒に変換
-                                                time_span_ns = time_range[1] - time_range[0]
-                                                time_span_seconds = time_span_ns / 1_000_000_000
-                                                has_sufficient_data = (
-                                                    time_span_seconds >= config_seconds
-                                                )
-                                            else:
-                                                print(
-                                                    f"⚠️ Invalid time_range types for {symbol}: {type(time_range[0])}, {type(time_range[1])}"
-                                                )
-                                                has_sufficient_data = False
-                                        except Exception as time_error:
-                                            print(
-                                                f"⚠️ Time calculation error for {symbol}: {time_error}"
+                                            # ティックデータを作成してstrategyに渡す
+                                            tick_data = TickData(
+                                                symbol=symbol,
+                                                price=price_f,
+                                                timestamp=tick_timestamp_ns,
+                                                volume=0.0  # デフォルト値
                                             )
-                                            has_sufficient_data = False
+                                            
+                                            # 戦略エンジンでティック処理と取引実行
+                                            trade_executed = TradeMini._mp_strategy.process_tick_and_execute_trades(tick_data)
+                                            
+                                            if trade_executed:
+                                                print(f"🎯 Trade executed for {symbol}")
+                                                
+                                        except Exception as e:
+                                            print(f"❌ Strategy processing error for {symbol}: {e}")
                                     else:
-                                        has_sufficient_data = False
-
-                                    if has_sufficient_data and data_count >= 2:
-                                        # 現在価格と時刻
-                                        current_price = symbol_data.get_latest_price()
-                                        current_timestamp = tick_timestamp_ns
-
-                                        # N秒前の価格と時刻（詳細取得）
-                                        past_price = (
-                                            symbol_data.get_price_n_seconds_ago(
-                                                config_seconds
-                                            )
-                                        )
-                                        # tick_timestamp_nsが数値型であることを確認してからナノ秒演算
-                                        if tick_timestamp_ns and isinstance(
-                                            tick_timestamp_ns, int
-                                        ):
-                                            # config_secondsが数値型であることを確認
-                                            if isinstance(config_seconds, (int, float)):
-                                                # ナノ秒タイムスタンプから秒数を引く
-                                                past_timestamp_ns = tick_timestamp_ns - int(float(config_seconds) * 1_000_000_000)
-                                            else:
-                                                print(f"⚠️ Invalid config_seconds type: {type(config_seconds)}")
-                                                past_timestamp_ns = None
-                                        else:
-                                            past_timestamp_ns = None
-
-                                        # 価格変動率を計算
-                                        price_change = (
-                                            symbol_data.get_price_change_percent(
-                                                config_seconds
-                                            )
-                                        )
-
-                                        # 詳細表示
-                                        if (
-                                            price_change is not None
-                                            and past_price is not None
-                                            and current_price is not None
-                                        ):
-                                            try:
-                                                # 型安全性を確保して差額計算
-                                                price_diff = float(
-                                                    current_price
-                                                ) - float(past_price)
-                                                print(
-                                                    f"📈 {symbol}: 変動率={price_change:.4f}% over {config_seconds}s"
-                                                )
-                                                print(
-                                                    f"   現在: {current_price:.8f} @ {current_timestamp.strftime('%H:%M:%S.%f')[:-3] if current_timestamp and isinstance(current_timestamp, datetime) else 'N/A'}"
-                                                )
-                                                print(
-                                                    f"   {config_seconds}秒前: {past_price:.8f} @ {past_timestamp.strftime('%H:%M:%S.%f')[:-3] if past_timestamp and isinstance(past_timestamp, datetime) else 'N/A'}"
-                                                )
-                                                print(
-                                                    f"   差額: {price_diff:.8f} ({'+' if price_change > 0 else ''}{price_change:.4f}%)"
-                                                )
-                                            except (
-                                                TypeError,
-                                                ValueError,
-                                            ) as calc_error:
-                                                print(
-                                                    f"📈 {symbol}: 価格計算エラー ({calc_error}) current={current_price}, past={past_price}"
-                                                )
-                                        else:
-                                            print(
-                                                f"📈 {symbol}: 変動率計算不可 (current={current_price}, past={past_price}, change={price_change})"
-                                            )
-
-                                        # 設定値による閾値チェック
-                                        long_threshold = (
-                                            TradeMini._mp_config.long_threshold_percent
-                                        )
-                                        short_threshold = (
-                                            TradeMini._mp_config.short_threshold_percent
-                                        )
-
-                                        if price_change is not None:
-                                            if price_change >= long_threshold:
-                                                print(
-                                                    f"🔥 LONG THRESHOLD REACHED: {symbol} change={price_change}% >= {long_threshold}%"
-                                                )
-
-                                                # 実際にロングポジションを開く処理
-                                                try:
-                                                    if TradeMini._mp_position_manager is not None:
-                                                        success, message, position = (
-                                                            TradeMini._mp_position_manager.open_position(
-                                                                symbol,
-                                                                "LONG",
-                                                                price_f,
-                                                                tick_timestamp,
-                                                            )
-                                                        )
-                                                        if success:
-                                                            print(
-                                                                f"✅ LONG POSITION OPENED: {symbol} @ {price_f}"
-                                                            )
-                                                        else:
-                                                            print(
-                                                                f"❌ LONG POSITION FAILED: {symbol} - {message}"
-                                                            )
-                                                    else:
-                                                        print(f"⚠️ POSITION MANAGER DISABLED: {symbol} LONG signal ignored")
-                                                except Exception as e:
-                                                    print(
-                                                        f"❌ LONG POSITION ERROR: {symbol} - {e}"
-                                                    )
-
-                                            elif price_change <= -short_threshold:
-                                                print(
-                                                    f"🔥 SHORT THRESHOLD REACHED: {symbol} change={price_change}% <= -{short_threshold}%"
-                                                )
-
-                                                # 実際にショートポジションを開く処理
-                                                try:
-                                                    if TradeMini._mp_position_manager is not None:
-                                                        success, message, position = (
-                                                            TradeMini._mp_position_manager.open_position(
-                                                                symbol,
-                                                                "SHORT",
-                                                                price_f,
-                                                                tick_timestamp,
-                                                            )
-                                                        )
-                                                        if success:
-                                                            print(
-                                                                f"✅ SHORT POSITION OPENED: {symbol} @ {price_f}"
-                                                            )
-                                                        else:
-                                                            print(
-                                                                f"❌ SHORT POSITION FAILED: {symbol} - {message}"
-                                                            )
-                                                    else:
-                                                        print(f"⚠️ POSITION MANAGER DISABLED: {symbol} SHORT signal ignored")
-                                                except Exception as e:
-                                                    print(
-                                                        f"❌ SHORT POSITION ERROR: {symbol} - {e}"
-                                                    )
+                                        print(f"⚠️ Strategy engine not available for {symbol}")
 
                             except Exception as data_error:
                                 print(f"❌ 全銘柄分析失敗 for {symbol}: {data_error}")
