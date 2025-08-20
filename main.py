@@ -663,15 +663,15 @@ class TradeMini:
                                         config_seconds = 10.0
                                     if time_range[0] and time_range[1]:
                                         try:
-                                            # datetime型であることを確認してから計算
+                                            # int型（ナノ秒）であることを確認してから計算
                                             if isinstance(
-                                                time_range[0], datetime
-                                            ) and isinstance(time_range[1], datetime):
-                                                time_span = (
-                                                    time_range[1] - time_range[0]
-                                                ).total_seconds()
+                                                time_range[0], int
+                                            ) and isinstance(time_range[1], int):
+                                                # ナノ秒の差を秒に変換
+                                                time_span_ns = time_range[1] - time_range[0]
+                                                time_span_seconds = time_span_ns / 1_000_000_000
                                                 has_sufficient_data = (
-                                                    time_span >= config_seconds
+                                                    time_span_seconds >= config_seconds
                                                 )
                                             else:
                                                 print(
@@ -689,7 +689,7 @@ class TradeMini:
                                     if has_sufficient_data and data_count >= 2:
                                         # 現在価格と時刻
                                         current_price = symbol_data.get_latest_price()
-                                        current_timestamp = tick_timestamp
+                                        current_timestamp = tick_timestamp_ns
 
                                         # N秒前の価格と時刻（詳細取得）
                                         past_price = (
@@ -697,20 +697,19 @@ class TradeMini:
                                                 config_seconds
                                             )
                                         )
-                                        # tick_timestampがdatetime型であることを確認してからtimedelta演算
-                                        if tick_timestamp and isinstance(
-                                            tick_timestamp, datetime
+                                        # tick_timestamp_nsが数値型であることを確認してからナノ秒演算
+                                        if tick_timestamp_ns and isinstance(
+                                            tick_timestamp_ns, int
                                         ):
                                             # config_secondsが数値型であることを確認
                                             if isinstance(config_seconds, (int, float)):
-                                                past_timestamp = tick_timestamp - timedelta(
-                                                    seconds=float(config_seconds)
-                                                )
+                                                # ナノ秒タイムスタンプから秒数を引く
+                                                past_timestamp_ns = tick_timestamp_ns - int(float(config_seconds) * 1_000_000_000)
                                             else:
                                                 print(f"⚠️ Invalid config_seconds type: {type(config_seconds)}")
-                                                past_timestamp = None
+                                                past_timestamp_ns = None
                                         else:
-                                            past_timestamp = None
+                                            past_timestamp_ns = None
 
                                         # 価格変動率を計算
                                         price_change = (
