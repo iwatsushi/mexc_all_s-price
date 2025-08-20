@@ -486,7 +486,12 @@ class TradeMini:
             from position_manager import PositionManager
             
             # Bybitクライアントを作成（マルチプロセス環境のため独立したインスタンスが必要）
-            TradeMini._mp_bybit_client = BybitClient(TradeMini._mp_config)
+            TradeMini._mp_bybit_client = BybitClient(
+                TradeMini._mp_config.bybit_api_key,
+                TradeMini._mp_config.bybit_api_secret,
+                TradeMini._mp_config.bybit_environment,
+                TradeMini._mp_config.bybit_api_url,
+            )
             print("✅ Bybit client initialized for multiprocess", flush=True)
             logger.info("✅ Bybit client initialized for multiprocess")
             
