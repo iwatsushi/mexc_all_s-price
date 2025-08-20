@@ -27,7 +27,7 @@ class SymbolTickData:
         self.tick_data: Deque[TickData] = deque()
 
         # 高速アクセス用インデックス（タイムスタンプ -> TickData）
-        self.timestamp_index: Dict[datetime, TickData] = {}
+        self.timestamp_index: Dict[int, TickData] = {}
 
         # 最新データのキャッシュ
         self.latest_tick: Optional[TickData] = None
@@ -83,10 +83,10 @@ class SymbolTickData:
         if not self.tick_data:
             return
 
-        cutoff_time = datetime.now() - timedelta(seconds=self.retention_seconds)
+        cutoff_time_ns = int((time.time() - self.retention_seconds) * 1_000_000_000)
 
         # dequeの左端から古いデータを削除
-        while self.tick_data and self.tick_data[0].timestamp < cutoff_time:
+        while self.tick_data and self.tick_data[0].timestamp < cutoff_time_ns:
             old_tick = self.tick_data.popleft()
             # インデックスからも削除
             self.timestamp_index.pop(old_tick.timestamp, None)
@@ -101,33 +101,34 @@ class SymbolTickData:
             if not self.latest_tick:
                 return None
 
-            # datetime型であることを確認
-            if not isinstance(self.latest_tick.timestamp, datetime):
+            # int型（ナノ秒）であることを確認
+            if not isinstance(self.latest_tick.timestamp, int):
                 logger.warning(f"{self.symbol}: Invalid timestamp type: {type(self.latest_tick.timestamp)}")
                 return None
 
             try:
-                target_time = self.latest_tick.timestamp - timedelta(seconds=n_seconds)
+                # n_seconds前のナノ秒タイムスタンプを計算
+                target_time_ns = self.latest_tick.timestamp - (n_seconds * 1_000_000_000)
             except (TypeError, AttributeError) as e:
                 logger.warning(f"{self.symbol}: Timestamp calculation error: {e}")
                 return None
 
             # 最も近い過去の価格を探す
             closest_tick = None
-            min_time_diff = float("inf")
+            min_time_diff_ns = float("inf")
 
             for tick in reversed(self.tick_data):  # 新しいものから検索
-                if not isinstance(tick.timestamp, datetime):
+                if not isinstance(tick.timestamp, int):
                     continue
                 
                 try:
-                    time_diff = abs((tick.timestamp - target_time).total_seconds())
-                    if time_diff < min_time_diff:
-                        min_time_diff = time_diff
+                    time_diff_ns = abs(tick.timestamp - target_time_ns)
+                    if time_diff_ns < min_time_diff_ns:
+                        min_time_diff_ns = time_diff_ns
                         closest_tick = tick
 
                     # target_timeより古くなったら検索終了
-                    if tick.timestamp < target_time:
+                    if tick.timestamp < target_time_ns:
                         break
                 except (TypeError, AttributeError):
                     continue
@@ -169,8 +170,8 @@ class SymbolTickData:
         with self._lock:
             return len(self.tick_data)
 
-    def get_time_range(self) -> tuple[Optional[datetime], Optional[datetime]]:
-        """データの時間範囲を取得"""
+    def get_time_range(self) -> tuple[Optional[int], Optional[int]]:
+        """データの時間範囲を取得（ナノ秒単位のタイムスタンプ）"""
         with self._lock:
             if not self.tick_data:
                 return None, None
@@ -199,8 +200,8 @@ class DataManager:
         self.stats = {
             "active_symbols": 0,
             "total_ticks": 0,
-            "start_time": datetime.now(),
-            "last_cleanup": datetime.now(),
+            "start_time": time.time(),  # UNIX秒単位
+            "last_cleanup": time.time(),  # UNIX秒単位
         }
 
         # スレッドセーフティ用ロック
@@ -309,7 +310,7 @@ class DataManager:
 
             # 統計更新
             self.stats["active_symbols"] = len(self.symbol_data)
-            self.stats["last_cleanup"] = datetime.now()
+            self.stats["last_cleanup"] = time.time()
 
             logger.debug(
                 f"Cleanup completed. Active symbols: {self.stats['active_symbols']}"
@@ -330,7 +331,7 @@ class DataManager:
                 }
 
             stats["symbols"] = symbol_stats
-            stats["runtime"] = (datetime.now() - stats["start_time"]).total_seconds()
+            stats["runtime"] = time.time() - stats["start_time"]
 
             return stats
 

@@ -527,7 +527,14 @@ class TradeMini:
     def _process_batch_lightning_fast(
         tickers: list, batch_timestamp: float, batch_id: int
     ):
-        """バッチ処理（QuestDB保存 + 戦略分析）"""
+        """
+        バッチ処理（QuestDB保存 + 戦略分析）
+        
+        タイムスタンプ統一方針：
+        - 基本：MEXCのAPIタイムスタンプ (datetime.fromtimestamp(mexc_timestamp / 1000))
+        - フォールバック：バッチ受信時刻 (datetime.fromtimestamp(batch_timestamp))
+        - 廃止：datetime.now() の使用（データ一貫性のため）
+        """
         # 強制的なログ出力（マルチプロセス内でのデバッグ）
         print(
             f"🔥 BATCH FUNCTION CALLED: batch_id={batch_id}, tickers={len(tickers)}",
@@ -547,6 +554,8 @@ class TradeMini:
         try:
             # 🚀 JSONから直接QuestDB ILP形式に変換
             batch_ts_ns = int(batch_timestamp * 1_000_000_000)
+            
+            # バッチ受信時刻をナノ秒タイムスタンプで統一（QuestDBと同じ形式）
 
             # サンプルティッカーデータの構造をログ出力（最初のバッチのみ）
             if batch_id == 1 and len(tickers) > 0:
@@ -581,10 +590,14 @@ class TradeMini:
                         volume_f = float(volume)
 
                         # MEXCタイムスタンプを使用（ミリ秒→ナノ秒変換）
-                        if mexc_timestamp and isinstance(mexc_timestamp, (int, float)):
-                            timestamp_ns = int(
-                                mexc_timestamp * 1_000_000
-                            )  # ミリ秒→ナノ秒
+                        if mexc_timestamp is not None and isinstance(mexc_timestamp, (int, float)):
+                            try:
+                                # 型安全性を強化：必ずfloatに変換してから計算
+                                timestamp_ms = float(mexc_timestamp)
+                                timestamp_ns = int(timestamp_ms * 1_000_000)  # ミリ秒→ナノ秒
+                            except (ValueError, TypeError) as e:
+                                print(f"⚠️ Timestamp conversion error for {symbol}: {mexc_timestamp} - {e}")
+                                timestamp_ns = batch_ts_ns  # フォールバック
                         else:
                             timestamp_ns = batch_ts_ns  # フォールバック
 
@@ -609,36 +622,21 @@ class TradeMini:
                                     f"🔄 全銘柄分析: {symbol} (processed_count={processed_count})"
                                 )
 
-                                # TickDataオブジェクトの作成（MEXCの実際のタイムスタンプを使用）
-                                mexc_timestamp = ticker_data.get("timestamp")
-                                if mexc_timestamp is not None and isinstance(
-                                    mexc_timestamp, (int, float)
-                                ):
-                                    try:
-                                        # MEXCはミリ秒単位のUNIXタイムスタンプを提供
-                                        tick_timestamp = datetime.fromtimestamp(
-                                            mexc_timestamp / 1000
-                                        )
-                                    except (ValueError, OverflowError, OSError) as e:
-                                        print(
-                                            f"⚠️ Invalid timestamp for {symbol}: {mexc_timestamp} - {e}"
-                                        )
-                                        tick_timestamp = datetime.now()
-                                else:
-                                    # フォールバック（通常は不要）
-                                    tick_timestamp = datetime.now()
+                                # TickDataオブジェクトの作成（数値タイムスタンプで統一）
+                                # QuestDBと同じtimestamp_nsを使用してdatetime型との混在を回避
+                                tick_timestamp_ns = timestamp_ns  # 既に計算済みのナノ秒タイムスタンプを使用
 
                                 tick = TickData(
                                     symbol=symbol,
                                     price=price_f,
-                                    timestamp=tick_timestamp,
+                                    timestamp=tick_timestamp_ns,  # ナノ秒単位の数値タイムスタンプ
                                     volume=volume_f,
                                 )
 
                                 # データ追加
-                                start_time = datetime.now()
+                                start_time = time.time()
                                 TradeMini._mp_data_manager.add_tick(tick)
-                                elapsed = (datetime.now() - start_time).total_seconds()
+                                elapsed = time.time() - start_time
 
                                 print(
                                     f"✅ Data added successfully in {elapsed:.3f}s for {symbol}"
@@ -656,9 +654,13 @@ class TradeMini:
                                     )
 
                                     # 設定された時間分のデータが蓄積されているかチェック
-                                    config_seconds = (
-                                        TradeMini._mp_config.price_comparison_seconds
-                                    )
+                                    config_seconds_raw = TradeMini._mp_config.price_comparison_seconds
+                                    # config_secondsの型安全性を確保
+                                    if isinstance(config_seconds_raw, (int, float)):
+                                        config_seconds = float(config_seconds_raw)
+                                    else:
+                                        print(f"⚠️ Invalid config_seconds type: {type(config_seconds_raw)}, using default 10")
+                                        config_seconds = 10.0
                                     if time_range[0] and time_range[1]:
                                         try:
                                             # datetime型であることを確認してから計算
@@ -916,7 +918,13 @@ class TradeMini:
             )
 
         except Exception as e:
+            import traceback
             logger.error(f"Error in lightning processing: {e}")
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
+            # 型エラーの詳細を特定するため、変数の型情報を出力
+            print(f"DEBUG: Error occurred with exception type: {type(e)}")
+            print(f"DEBUG: Exception message: {str(e)}")
+            traceback.print_exc()
 
     @staticmethod
     def _send_to_questdb_lightning(ilp_lines: list) -> int:

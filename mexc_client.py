@@ -29,7 +29,7 @@ class TickData:
 
     symbol: str
     price: float
-    timestamp: datetime
+    timestamp: int  # ナノ秒単位のUNIXタイムスタンプ（数値型に統一）
     volume: float = 0.0
 
 
@@ -348,6 +348,9 @@ class MEXCWebSocketClient:
         # 📊 統計のみ（瞬時）
         logger.debug(f"🚀 Fast processing {len(tickers)} tickers (legacy mode)")
         processed_count = 0
+        
+        # バッチ受信時刻をフォールバック用に取得（ナノ秒単位）
+        batch_receive_time_ns = int(time.time() * 1_000_000_000)
 
         # 🎯 最小限の処理：TickDataオブジェクト作成と非同期キューイング
         for ticker in tickers:
@@ -363,22 +366,23 @@ class MEXCWebSocketClient:
                         mexc_timestamp, (int, float)
                     ):
                         try:
-                            tick_timestamp = datetime.fromtimestamp(
-                                mexc_timestamp / 1000
-                            )
-                        except (ValueError, OverflowError, OSError) as e:
+                            # 型安全性を強化：必ずfloatに変換してから計算
+                            timestamp_ms = float(mexc_timestamp)
+                            tick_timestamp_ns = int(timestamp_ms * 1_000_000)  # ミリ秒→ナノ秒
+                        except (ValueError, OverflowError, OSError, TypeError) as e:
                             logger.warning(
-                                f"Invalid timestamp for {symbol}: {mexc_timestamp} - {e}"
+                                f"Invalid timestamp for {symbol}: {mexc_timestamp} (type: {type(mexc_timestamp)}) - {e}"
                             )
-                            tick_timestamp = datetime.now()
+                            # フォールバック：バッチ受信時刻を使用
+                            tick_timestamp_ns = batch_receive_time_ns
                     else:
-                        # フォールバック（通常は不要だが安全のため）
-                        tick_timestamp = datetime.now()
+                        # フォールバック：バッチ受信時刻を使用（datetime.now()の代わり）
+                        tick_timestamp_ns = batch_receive_time_ns
 
                     tick = TickData(
                         symbol=symbol,
                         price=price,
-                        timestamp=tick_timestamp,
+                        timestamp=tick_timestamp_ns,  # ナノ秒単位の数値タイムスタンプ
                         volume=volume,
                     )
 
