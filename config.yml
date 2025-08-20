@@ -14,7 +14,7 @@ bybit:
     # "demo" - 本番デモトレード（推奨）
     # "testnet" - 開発者向けテストネット
     # "websocket-ping_only" - WebSocket受信+ping送信のみ（データ処理なし）
-    environment: "websocket-ping_only"
+    environment: "demo"
 
     # 本番取引環境（実資金）
     live:

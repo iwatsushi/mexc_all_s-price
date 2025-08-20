@@ -52,7 +52,7 @@ class TradeMini:
 
         # コンポーネント
         self.mexc_client = None
-        self.bybit_client = None
+        # self.bybit_client = None  # 削除：マルチプロセス内でのみ使用
         self.symbol_mapper = None
         self.data_manager = None
         self.strategy = None
@@ -159,14 +159,9 @@ class TradeMini:
             self.mexc_client = MEXCClient(self.config)
             logger.info("MEXC client created")
 
-            # Bybit クライアント（注文・決済用）
-            self.bybit_client = BybitClient(
-                self.config.bybit_api_key,
-                self.config.bybit_api_secret,
-                self.config.bybit_environment,
-                self.config.bybit_api_url,
-            )
-            logger.info("Bybit client created")
+            # Bybit クライアントはマルチプロセス内で初期化されるため、メインプロセスでは不要
+            # self.bybit_client = BybitClient(...)  # 削除：使用されていない
+            logger.info("Bybit client will be initialized in multiprocess worker")
 
             # 銘柄マッピング管理
             # self.symbol_mapper = SymbolMapper(self.bybit_client)  # 一時的に無効化
@@ -458,8 +453,10 @@ class TradeMini:
 
     # マルチプロセス用グローバル変数（プロセス開始時に一度だけ初期化）
     _mp_config = None
+    _mp_bybit_client = None
     _mp_data_manager = None
     _mp_strategy = None
+    _mp_position_manager = None
     _mp_symbol_mapper = None
 
     @staticmethod
@@ -483,8 +480,27 @@ class TradeMini:
             print("✅ TradingStrategy initialized", flush=True)
             logger.info("✅ TradingStrategy initialized")
 
-            # SymbolMapperはマルチプロセスで問題があるため、完全に無効化
-            TradeMini._mp_symbol_mapper = None
+            # マルチプロセス用のBybitClient初期化（各プロセスで必要なため独立したインスタンスを作成）
+            from bybit_client import BybitClient
+            from symbol_mapper import SymbolMapper
+            from position_manager import PositionManager
+            
+            # Bybitクライアントを作成（マルチプロセス環境のため独立したインスタンスが必要）
+            TradeMini._mp_bybit_client = BybitClient(TradeMini._mp_config)
+            print("✅ Bybit client initialized for multiprocess", flush=True)
+            logger.info("✅ Bybit client initialized for multiprocess")
+            
+            # SymbolMapperを初期化
+            TradeMini._mp_symbol_mapper = SymbolMapper(TradeMini._mp_bybit_client)
+            print("✅ SymbolMapper initialized for multiprocess", flush=True)
+            logger.info("✅ SymbolMapper initialized for multiprocess")
+
+            # PositionManagerを初期化
+            TradeMini._mp_position_manager = PositionManager(
+                TradeMini._mp_config, TradeMini._mp_bybit_client, TradeMini._mp_symbol_mapper
+            )
+            print("✅ PositionManager initialized for multiprocess", flush=True)
+            logger.info("✅ PositionManager initialized for multiprocess")
             print(
                 "✅ Multi-process components initialization completed successfully",
                 flush=True,
@@ -678,9 +694,14 @@ class TradeMini:
                                         if tick_timestamp and isinstance(
                                             tick_timestamp, datetime
                                         ):
-                                            past_timestamp = tick_timestamp - timedelta(
-                                                seconds=config_seconds
-                                            )
+                                            # config_secondsが数値型であることを確認
+                                            if isinstance(config_seconds, (int, float)):
+                                                past_timestamp = tick_timestamp - timedelta(
+                                                    seconds=float(config_seconds)
+                                                )
+                                            else:
+                                                print(f"⚠️ Invalid config_seconds type: {type(config_seconds)}")
+                                                past_timestamp = None
                                         else:
                                             past_timestamp = None
 
@@ -742,22 +763,25 @@ class TradeMini:
 
                                                 # 実際にロングポジションを開く処理
                                                 try:
-                                                    success, message, position = (
-                                                        TradeMini._mp_position_manager.open_position(
-                                                            symbol,
-                                                            "LONG",
-                                                            price_f,
-                                                            tick_timestamp,
+                                                    if TradeMini._mp_position_manager is not None:
+                                                        success, message, position = (
+                                                            TradeMini._mp_position_manager.open_position(
+                                                                symbol,
+                                                                "LONG",
+                                                                price_f,
+                                                                tick_timestamp,
+                                                            )
                                                         )
-                                                    )
-                                                    if success:
-                                                        print(
-                                                            f"✅ LONG POSITION OPENED: {symbol} @ {price_f}"
-                                                        )
+                                                        if success:
+                                                            print(
+                                                                f"✅ LONG POSITION OPENED: {symbol} @ {price_f}"
+                                                            )
+                                                        else:
+                                                            print(
+                                                                f"❌ LONG POSITION FAILED: {symbol} - {message}"
+                                                            )
                                                     else:
-                                                        print(
-                                                            f"❌ LONG POSITION FAILED: {symbol} - {message}"
-                                                        )
+                                                        print(f"⚠️ POSITION MANAGER DISABLED: {symbol} LONG signal ignored")
                                                 except Exception as e:
                                                     print(
                                                         f"❌ LONG POSITION ERROR: {symbol} - {e}"
@@ -770,22 +794,25 @@ class TradeMini:
 
                                                 # 実際にショートポジションを開く処理
                                                 try:
-                                                    success, message, position = (
-                                                        TradeMini._mp_position_manager.open_position(
-                                                            symbol,
-                                                            "SHORT",
-                                                            price_f,
-                                                            tick_timestamp,
+                                                    if TradeMini._mp_position_manager is not None:
+                                                        success, message, position = (
+                                                            TradeMini._mp_position_manager.open_position(
+                                                                symbol,
+                                                                "SHORT",
+                                                                price_f,
+                                                                tick_timestamp,
+                                                            )
                                                         )
-                                                    )
-                                                    if success:
-                                                        print(
-                                                            f"✅ SHORT POSITION OPENED: {symbol} @ {price_f}"
-                                                        )
+                                                        if success:
+                                                            print(
+                                                                f"✅ SHORT POSITION OPENED: {symbol} @ {price_f}"
+                                                            )
+                                                        else:
+                                                            print(
+                                                                f"❌ SHORT POSITION FAILED: {symbol} - {message}"
+                                                            )
                                                     else:
-                                                        print(
-                                                            f"❌ SHORT POSITION FAILED: {symbol} - {message}"
-                                                        )
+                                                        print(f"⚠️ POSITION MANAGER DISABLED: {symbol} SHORT signal ignored")
                                                 except Exception as e:
                                                     print(
                                                         f"❌ SHORT POSITION ERROR: {symbol} - {e}"
@@ -822,11 +849,14 @@ class TradeMini:
                                         if signal.signal_type == SignalType.LONG
                                         else "SHORT"
                                     )
-                                    success, message, position = (
-                                        TradeMini._mp_position_manager.open_position(
-                                            symbol, side, signal.price, signal.timestamp
+                                    if TradeMini._mp_position_manager is not None:
+                                        success, message, position = (
+                                            TradeMini._mp_position_manager.open_position(
+                                                symbol, side, signal.price, signal.timestamp
+                                            )
                                         )
-                                    )
+                                    else:
+                                        success, message, position = False, "Position manager disabled", None
 
                                     if success and position:
                                         logger.info(
@@ -839,11 +869,14 @@ class TradeMini:
 
                                 elif signal.signal_type == SignalType.CLOSE:
                                     # ポジションクローズ注文
-                                    success, message, position = (
-                                        TradeMini._mp_position_manager.close_position(
-                                            symbol, signal.reason
+                                    if TradeMini._mp_position_manager is not None:
+                                        success, message, position = (
+                                            TradeMini._mp_position_manager.close_position(
+                                                symbol, signal.reason
+                                            )
                                         )
-                                    )
+                                    else:
+                                        success, message, position = False, "Position manager disabled", None
 
                                     if success and position:
                                         logger.info(
@@ -1408,7 +1441,7 @@ class TradeMini:
                         last_health_check = current_time
 
                     # 定期的なクリーンアップ
-                    if int(time.time()) % 300 == 0:  # 5分毎
+                    if int(time.time()) % 300 == 0 and self.position_manager:  # 5分毎
                         self.position_manager.cleanup_closed_positions()
 
                 except KeyboardInterrupt:
