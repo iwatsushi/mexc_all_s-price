@@ -480,6 +480,12 @@ class TradeMini:
             print("✅ TradingStrategy initialized", flush=True)
             logger.info("✅ TradingStrategy initialized")
 
+            # マルチプロセス用のMEXCClient初期化（PositionManager用）
+            from mexc_client import MEXCWebSocketClient
+            TradeMini._mp_mexc_client = MEXCWebSocketClient(TradeMini._mp_config)
+            print("✅ MEXCClient initialized for multiprocess", flush=True)
+            logger.info("✅ MEXCClient initialized for multiprocess")
+
             # マルチプロセス用のBybitClient初期化（各プロセスで必要なため独立したインスタンスを作成）
             from bybit_client import BybitClient
             from symbol_mapper import SymbolMapper
@@ -500,9 +506,12 @@ class TradeMini:
             print("✅ SymbolMapper initialized for multiprocess", flush=True)
             logger.info("✅ SymbolMapper initialized for multiprocess")
 
-            # PositionManagerを初期化
+            # PositionManagerを初期化（config, mexc_client, bybit_client, symbol_mapperの順序）
             TradeMini._mp_position_manager = PositionManager(
-                TradeMini._mp_config, TradeMini._mp_bybit_client, TradeMini._mp_symbol_mapper
+                TradeMini._mp_config, 
+                TradeMini._mp_mexc_client,  # MEXCクライアントを追加
+                TradeMini._mp_bybit_client, 
+                TradeMini._mp_symbol_mapper
             )
             print("✅ PositionManager initialized for multiprocess", flush=True)
             logger.info("✅ PositionManager initialized for multiprocess")
