@@ -72,9 +72,16 @@ class PositionTracker:
 class TradingStrategy:
     """取引戦略クラス"""
 
-    def __init__(self, config: Config, data_manager: DataManager):
+    def __init__(self, config: Config, data_manager: DataManager, 
+                 position_manager=None, questdb_client=None, symbol_mapper=None, main_stats=None):
         self.config = config
         self.data_manager = data_manager
+        
+        # 統計表示用のコンポーネント参照
+        self.position_manager = position_manager
+        self.questdb_client = questdb_client
+        self.symbol_mapper = symbol_mapper
+        self.main_stats = main_stats
 
         # 戦略パラメータ
         self.price_comparison_seconds = config.price_comparison_seconds
@@ -415,3 +422,79 @@ class TradingStrategy:
         """指定銘柄の最新価格変動率を取得"""
         with self._lock:
             return self.price_changes.get(symbol, 0.0)
+    
+    def log_comprehensive_statistics(self, start_time: datetime, main_stats: dict):
+        """包括的な統計情報をログ出力"""
+        try:
+            # アップタイム計算
+            uptime = (datetime.now() - start_time).total_seconds()
+            
+            # 各コンポーネントの統計取得（安全な取得）
+            try:
+                data_stats = self.data_manager.get_stats() if self.data_manager else {}
+            except Exception as e:
+                logger.debug(f"Failed to get data_manager stats: {e}")
+                data_stats = {}
+                
+            strategy_stats = self.get_stats()
+            
+            try:
+                position_stats = (
+                    self.position_manager.get_stats() if self.position_manager else {}
+                )
+            except Exception as e:
+                logger.debug(f"Failed to get position_manager stats: {e}")
+                position_stats = {}
+                
+            try:
+                questdb_stats = (
+                    self.questdb_client.get_stats() if self.questdb_client else {}
+                )
+            except Exception as e:
+                logger.debug(f"Failed to get questdb_client stats: {e}")
+                questdb_stats = {}
+                
+            try:
+                symbol_stats = (
+                    self.symbol_mapper.get_mapping_stats() if self.symbol_mapper else {}
+                )
+            except Exception as e:
+                logger.debug(f"Failed to get symbol_mapper stats: {e}")
+                symbol_stats = {}
+
+            # ポートフォリオ要約
+            try:
+                portfolio = (
+                    self.position_manager.get_portfolio_summary()
+                    if self.position_manager
+                    else {}
+                )
+            except Exception as e:
+                logger.debug(f"Failed to get portfolio summary: {e}")
+                portfolio = {}
+
+            logger.info("=== TRADE MINI STATISTICS ===")
+            logger.info(f"Uptime: {uptime/3600:.2f} hours")
+            logger.info(f"Ticks processed: {main_stats.get('ticks_processed', 0)}")
+            logger.info(f"Signals generated: {strategy_stats.get('signals_generated', 0)}")
+            logger.info(f"Trades executed: {main_stats.get('trades_executed', 0)}")
+
+            logger.info(f"Active symbols: {data_stats.get('active_symbols', 0)}")
+            logger.info(f"Open positions: {position_stats.get('current_positions', 0)}")
+            logger.info(
+                f"Account balance: {portfolio.get('account_balance', 0):.2f} USDT"
+            )
+            logger.info(
+                f"Total unrealized PnL: {portfolio.get('total_unrealized_pnl', 0):.2f} USDT"
+            )
+
+            logger.info(f"QuestDB ticks saved: {questdb_stats.get('ticks_saved', 0)}")
+            logger.info(
+                f"Tradeable symbols on Bybit: {symbol_stats.get('total_tradeable_symbols', 0)}"
+            )
+            logger.info("=============================")
+
+        except Exception as e:
+            logger.error(f"Error logging comprehensive statistics: {e}")
+            import traceback
+            logger.debug(f"Statistics error traceback: {traceback.format_exc()}")

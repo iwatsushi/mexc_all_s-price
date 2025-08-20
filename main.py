@@ -159,34 +159,46 @@ class TradeMini:
             self.mexc_client = MEXCClient(self.config)
             logger.info("MEXC client created")
 
-            # Bybit クライアントはマルチプロセス内で初期化されるため、メインプロセスでは不要
-            # self.bybit_client = BybitClient(...)  # 削除：使用されていない
-            logger.info("Bybit client will be initialized in multiprocess worker")
+            # Bybit クライアント（統計表示用にメインプロセスでも初期化）
+            from bybit_client import BybitClient
+            self.bybit_client = BybitClient(
+                self.config.bybit_api_key,
+                self.config.bybit_api_secret,
+                self.config.bybit_environment,
+                self.config.bybit_api_url,
+            )
+            logger.info("Bybit client initialized for main process")
 
             # 銘柄マッピング管理
-            # self.symbol_mapper = SymbolMapper(self.bybit_client)  # 一時的に無効化
-            self.symbol_mapper = None
+            from symbol_mapper import SymbolMapper
+            self.symbol_mapper = SymbolMapper(self.bybit_client)
             logger.info("Symbol mapper created")
 
             # データ管理
             self.data_manager = DataManager(self.config)
             logger.info("Data manager created")
 
-            # 取引戦略
-            self.strategy = TradingStrategy(self.config, self.data_manager)
-            logger.info("Trading strategy created")
-
-            # ポジション管理
-            # self.position_manager = PositionManager(
-            #     self.config, self.mexc_client, self.bybit_client, self.symbol_mapper
-            # ) # 一時的に無効化（SymbolMapperがNoneのため）
-            self.position_manager = None
-            logger.info("Position manager created")
-
             # QuestDB クライアント
             self.questdb_client = QuestDBClient(self.config)
             self.trade_record_manager = QuestDBTradeRecordManager(self.questdb_client)
             logger.info("QuestDB client created")
+
+            # ポジション管理
+            from position_manager import PositionManager
+            self.position_manager = PositionManager(
+                self.config, self.mexc_client, self.bybit_client, self.symbol_mapper
+            )
+            logger.info("Position manager created")
+
+            # 取引戦略（統計表示用のコンポーネント参照を含む）
+            self.strategy = TradingStrategy(
+                self.config, self.data_manager,
+                position_manager=self.position_manager,
+                questdb_client=self.questdb_client,
+                symbol_mapper=self.symbol_mapper,
+                main_stats=self.stats
+            )
+            logger.info("Trading strategy created")
 
             # MEXC WebSocket 接続
             if not await self.mexc_client.start():
@@ -200,7 +212,9 @@ class TradeMini:
                 raise Exception("Failed to subscribe to all tickers")
 
             # 統計表示タイマー開始
+            logger.info("🔧 Starting statistics timer...")
             self._start_stats_timer()
+            logger.info("✅ Statistics timer started")
 
             # WebSocket+pingモード以外でマルチプロセス開始
             if self.config.get('bybit.environment') != 'websocket-ping_only':
@@ -1359,67 +1373,32 @@ class TradeMini:
         """統計表示タイマー開始"""
 
         def show_stats():
-            if self.running:
-                self._log_statistics()
-                # 次のタイマーをスケジュール
-                self.stats_timer = threading.Timer(60.0, show_stats)  # 1分間隔
-                self.stats_timer.daemon = True
-                self.stats_timer.start()
+            try:
+                logger.info("🔔 Statistics timer triggered")
+                if self.running and self.strategy:
+                    logger.info("📊 Calling strategy.log_comprehensive_statistics...")
+                    # 統計表示をstrategyに委任
+                    self.strategy.log_comprehensive_statistics(self.stats["start_time"], self.stats)
+                    logger.info("✅ Statistics display completed")
+                else:
+                    logger.warning(f"⚠️ Statistics skipped: running={self.running}, strategy={self.strategy is not None}")
+            except Exception as e:
+                logger.error(f"Error in stats display: {e}")
+                import traceback
+                logger.debug(f"Stats display error traceback: {traceback.format_exc()}")
+            finally:
+                # 次のタイマーをスケジュール（エラーがあっても継続）
+                if self.running:
+                    logger.info("⏰ Scheduling next statistics display in 10 seconds")
+                    self.stats_timer = threading.Timer(10.0, show_stats)  # 10秒間隔（テスト用）
+                    self.stats_timer.daemon = True
+                    self.stats_timer.start()
 
-        self.stats_timer = threading.Timer(60.0, show_stats)
+        logger.info("⏰ Initial statistics timer started (10 second interval)")
+        self.stats_timer = threading.Timer(10.0, show_stats)
         self.stats_timer.daemon = True
         self.stats_timer.start()
 
-    def _log_statistics(self):
-        """統計情報をログ出力"""
-        try:
-            # アップタイム計算
-            uptime = (datetime.now() - self.stats["start_time"]).total_seconds()
-            self.stats["uptime"] = uptime
-
-            # 各コンポーネントの統計取得
-            data_stats = self.data_manager.get_stats() if self.data_manager else {}
-            strategy_stats = self.strategy.get_stats() if self.strategy else {}
-            position_stats = (
-                self.position_manager.get_stats() if self.position_manager else {}
-            )
-            questdb_stats = (
-                self.questdb_client.get_stats() if self.questdb_client else {}
-            )
-            symbol_stats = (
-                self.symbol_mapper.get_mapping_stats() if self.symbol_mapper else {}
-            )
-
-            # ポートフォリオ要約
-            portfolio = (
-                self.position_manager.get_portfolio_summary()
-                if self.position_manager
-                else {}
-            )
-
-            logger.info("=== TRADE MINI STATISTICS ===")
-            logger.info(f"Uptime: {uptime/3600:.2f} hours")
-            logger.info(f"Ticks processed: {self.stats['ticks_processed']}")
-            logger.info(f"Signals generated: {self.stats['signals_generated']}")
-            logger.info(f"Trades executed: {self.stats['trades_executed']}")
-
-            logger.info(f"Active symbols: {data_stats.get('active_symbols', 0)}")
-            logger.info(f"Open positions: {position_stats.get('current_positions', 0)}")
-            logger.info(
-                f"Account balance: {portfolio.get('account_balance', 0):.2f} USDT"
-            )
-            logger.info(
-                f"Total unrealized PnL: {portfolio.get('total_unrealized_pnl', 0):.2f} USDT"
-            )
-
-            logger.info(f"QuestDB ticks saved: {questdb_stats.get('ticks_saved', 0)}")
-            logger.info(
-                f"Tradeable symbols on Bybit: {symbol_stats.get('total_tradeable_symbols', 0)}"
-            )
-            logger.info("=============================")
-
-        except Exception as e:
-            logger.error(f"Error logging statistics: {e}")
 
 
     async def run(self):
@@ -1512,7 +1491,9 @@ class TradeMini:
                 self.stats_timer.cancel()
 
             # 最終統計表示
-            self._log_statistics()
+            # 最終統計をstrategyから表示
+            if self.strategy:
+                self.strategy.log_comprehensive_statistics(self.stats["start_time"], self.stats)
 
             # 各コンポーネントのシャットダウン
             if self.mexc_client:
