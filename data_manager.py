@@ -103,12 +103,16 @@ class SymbolTickData:
 
             # int型（ナノ秒）であることを確認
             if not isinstance(self.latest_tick.timestamp, int):
-                logger.warning(f"{self.symbol}: Invalid timestamp type: {type(self.latest_tick.timestamp)}")
+                logger.warning(
+                    f"{self.symbol}: Invalid timestamp type: {type(self.latest_tick.timestamp)}"
+                )
                 return None
 
             try:
                 # n_seconds前のナノ秒タイムスタンプを計算
-                target_time_ns = self.latest_tick.timestamp - (n_seconds * 1_000_000_000)
+                target_time_ns = self.latest_tick.timestamp - (
+                    n_seconds * 1_000_000_000
+                )
             except (TypeError, AttributeError) as e:
                 logger.warning(f"{self.symbol}: Timestamp calculation error: {e}")
                 return None
@@ -120,7 +124,7 @@ class SymbolTickData:
             for tick in reversed(self.tick_data):  # 新しいものから検索
                 if not isinstance(tick.timestamp, int):
                     continue
-                
+
                 try:
                     time_diff_ns = abs(tick.timestamp - target_time_ns)
                     if time_diff_ns < min_time_diff_ns:

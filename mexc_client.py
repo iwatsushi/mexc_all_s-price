@@ -83,7 +83,7 @@ class MEXCWebSocketClient:
         # ping管理（受信ループ内で実行）
         self._last_ping_time = 0
         self._ping_interval = config.mexc_ping_interval  # 設定ファイルから読み込み
-        
+
         # pong重複検出
         self._last_pong_timestamp = None
 
@@ -199,7 +199,9 @@ class MEXCWebSocketClient:
 
             # ping初期化（受信ループ内で管理）
             self._last_ping_time = time.monotonic()
-            logger.info(f"💓 MEXC ping initialized ({self._ping_interval}s interval, unified)")
+            logger.info(
+                f"💓 MEXC ping initialized ({self._ping_interval}s interval, unified)"
+            )
 
             # メッセージ受信ループ（デバッグスクリプトと同じタイムアウト方式を採用）
             last_recv = time.monotonic()  # デバッグスクリプトと同じ単調時間を使用
@@ -210,9 +212,11 @@ class MEXCWebSocketClient:
             ticker_intervals = []
 
             logger.info("🔄 Starting WebSocket message receive loop...")
-            
-            logger.debug(f"🔍 DEBUG: shutdown_event.is_set() = {self.shutdown_event.is_set()}")
-            
+
+            logger.debug(
+                f"🔍 DEBUG: shutdown_event.is_set() = {self.shutdown_event.is_set()}"
+            )
+
             while not self.shutdown_event.is_set():
                 logger.debug("🔄 Entered main receive loop")
                 try:
@@ -287,11 +291,11 @@ class MEXCWebSocketClient:
 
             # inline ping管理のため特別なクリーンアップ不要
             logger.info("💓 MEXC inline ping stopped")
-    
+
     async def send_ping(self):
         """外部からping送信を要求するためのメソッド"""
         try:
-            if hasattr(self, '_websocket') and self._websocket:
+            if hasattr(self, "_websocket") and self._websocket:
                 ping_msg = {"method": "ping"}
                 ping_json = json.dumps(ping_msg)
                 await self._websocket.send(ping_json)
@@ -304,7 +308,6 @@ class MEXCWebSocketClient:
             logger.warning(f"💓 Failed to send external ping: {e}")
             return False
 
-
     def _process_ticker_batch_safe(self, raw_message):
         """WebSocket受信を保護する超高速バッチティッカーデータ処理（生データ解凍統合版）"""
         if not self.batch_callback:
@@ -314,19 +317,23 @@ class MEXCWebSocketClient:
         # 💓 統一ping送信チェック（全モード対応）
         current_time = time.monotonic()
         time_since_last_ping = current_time - self._last_ping_time
-        
+
         if time_since_last_ping >= self._ping_interval:
             try:
                 # WebSocket参照が利用できる場合のみping送信
-                if hasattr(self, '_websocket') and self._websocket:
+                if hasattr(self, "_websocket") and self._websocket:
                     ping_msg = {"method": "ping"}
                     ping_json = json.dumps(ping_msg)
                     # 非同期でping送信（ブロッキングを避けるため）
                     asyncio.create_task(self._websocket.send(ping_json))
                     self._last_ping_time = current_time
-                    logger.info(f"💓 MEXC ping sent (unified, after {time_since_last_ping:.1f}s): {ping_json}")
+                    logger.info(
+                        f"💓 MEXC ping sent (unified, after {time_since_last_ping:.1f}s): {ping_json}"
+                    )
                 else:
-                    logger.debug(f"💓 WebSocket reference not available for ping (after {time_since_last_ping:.1f}s)")
+                    logger.debug(
+                        f"💓 WebSocket reference not available for ping (after {time_since_last_ping:.1f}s)"
+                    )
             except Exception as e:
                 logger.warning(f"💓 Failed to send ping: {e}")
 
@@ -355,19 +362,21 @@ class MEXCWebSocketClient:
                 return
             elif data.get("channel") == "pong":
                 pong_data = data.get("data", "unknown")
-                
+
                 # 重複pongチェック
                 if self._last_pong_timestamp == pong_data:
                     logger.debug(f"💓 Duplicate pong ignored: {pong_data}")
                     return
-                
+
                 self._last_pong_timestamp = pong_data
                 logger.info(f"💓 Received pong from server: {pong_data}")
                 return
             else:
-                channel = data.get('channel', 'unknown')
-                logger.info(f"🔍 Unhandled channel: {channel}, data keys: {list(data.keys())}")
-                if channel not in ['push.tickers', 'tickers']:  # 頻繁なメッセージは除外
+                channel = data.get("channel", "unknown")
+                logger.info(
+                    f"🔍 Unhandled channel: {channel}, data keys: {list(data.keys())}"
+                )
+                if channel not in ["push.tickers", "tickers"]:  # 頻繁なメッセージは除外
                     logger.info(f"🔍 Full unhandled message: {data}")
                 return
 
@@ -391,7 +400,7 @@ class MEXCWebSocketClient:
         # 📊 統計のみ（瞬時）
         logger.debug(f"🚀 Fast processing {len(tickers)} tickers (legacy mode)")
         processed_count = 0
-        
+
         # バッチ受信時刻をフォールバック用に取得（ナノ秒単位）
         batch_receive_time_ns = int(time.time() * 1_000_000_000)
 
@@ -411,7 +420,9 @@ class MEXCWebSocketClient:
                         try:
                             # 型安全性を強化：必ずfloatに変換してから計算
                             timestamp_ms = float(mexc_timestamp)
-                            tick_timestamp_ns = int(timestamp_ms * 1_000_000)  # ミリ秒→ナノ秒
+                            tick_timestamp_ns = int(
+                                timestamp_ms * 1_000_000
+                            )  # ミリ秒→ナノ秒
                         except (ValueError, OverflowError, OSError, TypeError) as e:
                             logger.warning(
                                 f"Invalid timestamp for {symbol}: {mexc_timestamp} (type: {type(mexc_timestamp)}) - {e}"

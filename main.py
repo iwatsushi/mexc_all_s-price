@@ -64,7 +64,7 @@ class TradeMini:
         # 実行制御
         self.running = False
         self.shutdown_event = threading.Event()
-        
+
         # マルチプロセス管理
         self.websocket_process = None
         self.websocket_data_queue = None
@@ -163,21 +163,21 @@ class TradeMini:
             # プロセス間通信キュー作成
             self.websocket_data_queue = multiprocessing.Queue(maxsize=1000)
             self.websocket_control_queue = multiprocessing.Queue(maxsize=10)
-            
+
             # WebSocketプロセス作成
             self.websocket_process = multiprocessing.Process(
                 target=mexc_websocket_worker,
                 args=(
                     self.config._config,  # 設定辞書を渡す
                     self.websocket_data_queue,
-                    self.websocket_control_queue
+                    self.websocket_control_queue,
                 ),
-                name="MEXCWebSocketProcess"
+                name="MEXCWebSocketProcess",
             )
-            
+
             logger.info("🚀 MEXC WebSocket Process initialized")
             self.use_dedicated_websocket_process = True
-            
+
         except Exception as e:
             logger.error(f"💥 Failed to initialize WebSocket process: {e}")
             raise
@@ -187,7 +187,9 @@ class TradeMini:
         if self.websocket_process and not self.websocket_process.is_alive():
             try:
                 self.websocket_process.start()
-                logger.info(f"✅ MEXC WebSocket Process started (PID: {self.websocket_process.pid})")
+                logger.info(
+                    f"✅ MEXC WebSocket Process started (PID: {self.websocket_process.pid})"
+                )
             except Exception as e:
                 logger.error(f"💥 Failed to start WebSocket process: {e}")
                 raise
@@ -198,22 +200,24 @@ class TradeMini:
             try:
                 # 停止シグナル送信
                 self.websocket_control_queue.put("shutdown")
-                
+
                 # プロセス終了を待つ（タイムアウト付き）
                 self.websocket_process.join(timeout=10)
-                
+
                 if self.websocket_process.is_alive():
-                    logger.warning("⚠️ WebSocket process did not shutdown gracefully, terminating...")
+                    logger.warning(
+                        "⚠️ WebSocket process did not shutdown gracefully, terminating..."
+                    )
                     self.websocket_process.terminate()
                     self.websocket_process.join(timeout=5)
-                    
+
                     if self.websocket_process.is_alive():
                         logger.error("💥 Force killing WebSocket process...")
                         self.websocket_process.kill()
                         self.websocket_process.join()
-                
+
                 logger.info("✅ MEXC WebSocket Process stopped")
-                
+
             except Exception as e:
                 logger.error(f"💥 Error stopping WebSocket process: {e}")
 
@@ -224,20 +228,20 @@ class TradeMini:
                 # 非ブロッキングでデータ取得
                 if not self.websocket_data_queue.empty():
                     data_packet = self.websocket_data_queue.get_nowait()
-                    
-                    packet_type = data_packet.get('type')
-                    if packet_type == 'tickers':
+
+                    packet_type = data_packet.get("type")
+                    if packet_type == "tickers":
                         # ティッカーデータを既存のコールバックに転送
-                        tickers = data_packet.get('data', [])
+                        tickers = data_packet.get("data", [])
                         if tickers:
                             self._on_ticker_batch_received(tickers)
-                    elif packet_type == 'stats':
+                    elif packet_type == "stats":
                         # WebSocketプロセス統計情報を処理
-                        ws_stats = data_packet.get('data', {})
+                        ws_stats = data_packet.get("data", {})
                         logger.debug(f"📊 WebSocket Process Stats: {ws_stats}")
-                
+
                 await asyncio.sleep(0.01)  # CPU使用率制御
-                
+
             except Exception as e:
                 logger.warning(f"⚠️ Error processing WebSocket data: {e}")
                 await asyncio.sleep(0.1)
@@ -248,8 +252,10 @@ class TradeMini:
 
         try:
             # WebSocket処理方式の判定
-            use_dedicated_process = self.config.get('bybit.environment') != 'websocket-ping_only'
-            
+            use_dedicated_process = (
+                self.config.get("bybit.environment") != "websocket-ping_only"
+            )
+
             if use_dedicated_process:
                 # 専用WebSocketプロセス使用
                 logger.info("🚀 Using dedicated WebSocket process for MEXC connection")
@@ -262,6 +268,7 @@ class TradeMini:
 
             # Bybit クライアント（統計表示用にメインプロセスでも初期化）
             from bybit_client import BybitClient
+
             self.bybit_client = BybitClient(
                 self.config.bybit_api_key,
                 self.config.bybit_api_secret,
@@ -272,6 +279,7 @@ class TradeMini:
 
             # 銘柄マッピング管理
             from symbol_mapper import SymbolMapper
+
             self.symbol_mapper = SymbolMapper(self.bybit_client)
             logger.info("Symbol mapper created")
 
@@ -286,6 +294,7 @@ class TradeMini:
 
             # ポジション管理
             from position_manager import PositionManager
+
             self.position_manager = PositionManager(
                 self.config, self.mexc_client, self.bybit_client, self.symbol_mapper
             )
@@ -293,11 +302,12 @@ class TradeMini:
 
             # 取引戦略（統計表示用のコンポーネント参照を含む）
             self.strategy = TradingStrategy(
-                self.config, self.data_manager,
+                self.config,
+                self.data_manager,
                 position_manager=self.position_manager,
                 questdb_client=self.questdb_client,
                 symbol_mapper=self.symbol_mapper,
-                main_stats=self.stats
+                main_stats=self.stats,
             )
             logger.info("Trading strategy created")
 
@@ -324,7 +334,7 @@ class TradeMini:
             logger.info("✅ Statistics timer started")
 
             # WebSocket+pingモード以外でマルチプロセス開始
-            if self.config.get('bybit.environment') != 'websocket-ping_only':
+            if self.config.get("bybit.environment") != "websocket-ping_only":
                 # 🚀 真のマルチプロセスデータ処理ワーカー開始（GIL完全回避）
                 self._start_multiprocess_data_worker()
             else:
@@ -341,13 +351,13 @@ class TradeMini:
         """WebSocket受信コールバック（真のマルチプロセス分離）"""
         try:
             # ping処理テストログは無効化
-            
+
             # 🚀 受信証明のみ（極限の軽量化 < 0.001ms）
             self.reception_stats["batches_received"] += 1
             current_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
 
             # WebSocket+pingモードの場合は詳細統計のみ（データ処理スキップ）
-            if self.config.get('bybit.environment') == 'websocket-ping_only':
+            if self.config.get("bybit.environment") == "websocket-ping_only":
                 self._handle_websocket_monitor_batch(tickers, current_time)
                 return
 
@@ -381,60 +391,66 @@ class TradeMini:
     def _handle_websocket_monitor_batch(self, tickers: list, current_time: str):
         """WebSocket監視モード用バッチ処理"""
         # 受信間隔測定
-        if not hasattr(self, '_last_monitor_time'):
+        if not hasattr(self, "_last_monitor_time"):
             self._last_monitor_time = time.time()
             self._monitor_intervals = []
-            self._monitor_min_interval = float('inf')
+            self._monitor_min_interval = float("inf")
             self._monitor_max_interval = 0.0
             self._monitor_start_time = time.time()
             # ping送信管理はMEXCClient内で統一処理
-        
+
         current_timestamp = time.time()
         if self._last_monitor_time:
             interval = current_timestamp - self._last_monitor_time
             self._monitor_intervals.append(interval)
             self._monitor_min_interval = min(self._monitor_min_interval, interval)
             self._monitor_max_interval = max(self._monitor_max_interval, interval)
-            
+
             # 直近100件のみ保持
             if len(self._monitor_intervals) > 100:
                 self._monitor_intervals.pop(0)
-        
+
         self._last_monitor_time = current_timestamp
-        
+
         # 統計更新（ping処理より前に実行）
         self.reception_stats["batches_received"] += 1
         self.reception_stats["tickers_received"] += len(tickers)
-        
+
         # 💓 ping送信はMEXCClient内で統一処理（監視モードでも共通）
-        
+
         # 詳細ログ（受信統計） - 重複削除
         # logger.info(
         #     f"📊 [{current_time}] WebSocket Monitor: Batch #{self.reception_stats['batches_received']}: "
         #     f"{len(tickers)} tickers (total: {self.reception_stats['tickers_received']})"
         # )
-    
-    
 
     def _print_websocket_monitor_stats(self):
         """WebSocket監視モード統計表示"""
         uptime = time.time() - self._monitor_start_time
-        
+
         # 受信レート計算
-        message_rate = self.reception_stats["batches_received"] / uptime if uptime > 0 else 0
-        ticker_rate = self.reception_stats["tickers_received"] / uptime if uptime > 0 else 0
-        
+        message_rate = (
+            self.reception_stats["batches_received"] / uptime if uptime > 0 else 0
+        )
+        ticker_rate = (
+            self.reception_stats["tickers_received"] / uptime if uptime > 0 else 0
+        )
+
         # 受信間隔統計
         avg_interval = 0
-        if hasattr(self, '_monitor_intervals') and self._monitor_intervals:
+        if hasattr(self, "_monitor_intervals") and self._monitor_intervals:
             avg_interval = sum(self._monitor_intervals) / len(self._monitor_intervals)
-        
+
         logger.info("📊 WebSocket Monitor Stats (Main Process):")
         logger.info(f"   ⏱️  Uptime: {uptime:.1f}s")
-        logger.info(f"   📨 Total batches: {self.reception_stats['batches_received']} ({message_rate:.2f}/s)")
-        logger.info(f"   📈 Total tickers: {self.reception_stats['tickers_received']} ({ticker_rate:.2f}/s)")
-        
-        if hasattr(self, '_monitor_intervals') and self._monitor_intervals:
+        logger.info(
+            f"   📨 Total batches: {self.reception_stats['batches_received']} ({message_rate:.2f}/s)"
+        )
+        logger.info(
+            f"   📈 Total tickers: {self.reception_stats['tickers_received']} ({ticker_rate:.2f}/s)"
+        )
+
+        if hasattr(self, "_monitor_intervals") and self._monitor_intervals:
             logger.info(
                 f"   📊 Batch intervals: avg={avg_interval:.3f}s, "
                 f"min={self._monitor_min_interval:.3f}s, max={self._monitor_max_interval:.3f}s"
@@ -606,15 +622,16 @@ class TradeMini:
 
             # マルチプロセス用のMEXCClient初期化（PositionManager用）
             from mexc_client import MEXCWebSocketClient
+
             TradeMini._mp_mexc_client = MEXCWebSocketClient(TradeMini._mp_config)
             print("✅ MEXCClient initialized for multiprocess", flush=True)
             logger.info("✅ MEXCClient initialized for multiprocess")
 
             # マルチプロセス用のBybitClient初期化（各プロセスで必要なため独立したインスタンスを作成）
             from bybit_client import BybitClient
-            from symbol_mapper import SymbolMapper
             from position_manager import PositionManager
-            
+            from symbol_mapper import SymbolMapper
+
             # Bybitクライアントを作成（マルチプロセス環境のため独立したインスタンスが必要）
             TradeMini._mp_bybit_client = BybitClient(
                 TradeMini._mp_config.bybit_api_key,
@@ -624,7 +641,7 @@ class TradeMini:
             )
             print("✅ Bybit client initialized for multiprocess", flush=True)
             logger.info("✅ Bybit client initialized for multiprocess")
-            
+
             # SymbolMapperを初期化
             TradeMini._mp_symbol_mapper = SymbolMapper(TradeMini._mp_bybit_client)
             print("✅ SymbolMapper initialized for multiprocess", flush=True)
@@ -632,10 +649,10 @@ class TradeMini:
 
             # PositionManagerを初期化（config, mexc_client, bybit_client, symbol_mapperの順序）
             TradeMini._mp_position_manager = PositionManager(
-                TradeMini._mp_config, 
+                TradeMini._mp_config,
                 TradeMini._mp_mexc_client,  # MEXCクライアントを追加
-                TradeMini._mp_bybit_client, 
-                TradeMini._mp_symbol_mapper
+                TradeMini._mp_bybit_client,
+                TradeMini._mp_symbol_mapper,
             )
             print("✅ PositionManager initialized for multiprocess", flush=True)
             logger.info("✅ PositionManager initialized for multiprocess")
@@ -668,7 +685,7 @@ class TradeMini:
     ):
         """
         バッチ処理（QuestDB保存 + 戦略分析）
-        
+
         タイムスタンプ統一方針：
         - 基本：MEXCのAPIタイムスタンプ (datetime.fromtimestamp(mexc_timestamp / 1000))
         - フォールバック：バッチ受信時刻 (datetime.fromtimestamp(batch_timestamp))
@@ -693,7 +710,7 @@ class TradeMini:
         try:
             # 🚀 JSONから直接QuestDB ILP形式に変換
             batch_ts_ns = int(batch_timestamp * 1_000_000_000)
-            
+
             # バッチ受信時刻をナノ秒タイムスタンプで統一（QuestDBと同じ形式）
 
             # サンプルティッカーデータの構造をログ出力（最初のバッチのみ）
@@ -729,13 +746,19 @@ class TradeMini:
                         volume_f = float(volume)
 
                         # MEXCタイムスタンプを使用（ミリ秒→ナノ秒変換）
-                        if mexc_timestamp is not None and isinstance(mexc_timestamp, (int, float)):
+                        if mexc_timestamp is not None and isinstance(
+                            mexc_timestamp, (int, float)
+                        ):
                             try:
                                 # 型安全性を強化：必ずfloatに変換してから計算
                                 timestamp_ms = float(mexc_timestamp)
-                                timestamp_ns = int(timestamp_ms * 1_000_000)  # ミリ秒→ナノ秒
+                                timestamp_ns = int(
+                                    timestamp_ms * 1_000_000
+                                )  # ミリ秒→ナノ秒
                             except (ValueError, TypeError) as e:
-                                print(f"⚠️ Timestamp conversion error for {symbol}: {mexc_timestamp} - {e}")
+                                print(
+                                    f"⚠️ Timestamp conversion error for {symbol}: {mexc_timestamp} - {e}"
+                                )
                                 timestamp_ns = batch_ts_ns  # フォールバック
                         else:
                             timestamp_ns = batch_ts_ns  # フォールバック
@@ -800,19 +823,25 @@ class TradeMini:
                                                 symbol=symbol,
                                                 price=price_f,
                                                 timestamp=tick_timestamp_ns,
-                                                volume=0.0  # デフォルト値
+                                                volume=0.0,  # デフォルト値
                                             )
-                                            
+
                                             # 戦略エンジンでティック処理と取引実行
-                                            trade_executed = TradeMini._mp_strategy.process_tick_and_execute_trades(tick_data)
-                                            
+                                            trade_executed = TradeMini._mp_strategy.process_tick_and_execute_trades(
+                                                tick_data
+                                            )
+
                                             if trade_executed:
                                                 print(f"🎯 Trade executed for {symbol}")
-                                                
+
                                         except Exception as e:
-                                            print(f"❌ Strategy processing error for {symbol}: {e}")
+                                            print(
+                                                f"❌ Strategy processing error for {symbol}: {e}"
+                                            )
                                     else:
-                                        print(f"⚠️ Strategy engine not available for {symbol}")
+                                        print(
+                                            f"⚠️ Strategy engine not available for {symbol}"
+                                        )
 
                             except Exception as data_error:
                                 print(f"❌ 全銘柄分析失敗 for {symbol}: {data_error}")
@@ -848,11 +877,18 @@ class TradeMini:
                                     if TradeMini._mp_position_manager is not None:
                                         success, message, position = (
                                             TradeMini._mp_position_manager.open_position(
-                                                symbol, side, signal.price, signal.timestamp
+                                                symbol,
+                                                side,
+                                                signal.price,
+                                                signal.timestamp,
                                             )
                                         )
                                     else:
-                                        success, message, position = False, "Position manager disabled", None
+                                        success, message, position = (
+                                            False,
+                                            "Position manager disabled",
+                                            None,
+                                        )
 
                                     if success and position:
                                         logger.info(
@@ -872,7 +908,11 @@ class TradeMini:
                                             )
                                         )
                                     else:
-                                        success, message, position = False, "Position manager disabled", None
+                                        success, message, position = (
+                                            False,
+                                            "Position manager disabled",
+                                            None,
+                                        )
 
                                     if success and position:
                                         logger.info(
@@ -908,6 +948,7 @@ class TradeMini:
 
         except Exception as e:
             import traceback
+
             logger.error(f"Error in lightning processing: {e}")
             logger.error(f"Full traceback:\n{traceback.format_exc()}")
             # 型エラーの詳細を特定するため、変数の型情報を出力
@@ -1345,19 +1386,26 @@ class TradeMini:
                 if self.running and self.strategy:
                     logger.info("📊 Calling strategy.log_comprehensive_statistics...")
                     # 統計表示をstrategyに委任
-                    self.strategy.log_comprehensive_statistics(self.stats["start_time"], self.stats)
+                    self.strategy.log_comprehensive_statistics(
+                        self.stats["start_time"], self.stats
+                    )
                     logger.info("✅ Statistics display completed")
                 else:
-                    logger.warning(f"⚠️ Statistics skipped: running={self.running}, strategy={self.strategy is not None}")
+                    logger.warning(
+                        f"⚠️ Statistics skipped: running={self.running}, strategy={self.strategy is not None}"
+                    )
             except Exception as e:
                 logger.error(f"Error in stats display: {e}")
                 import traceback
+
                 logger.debug(f"Stats display error traceback: {traceback.format_exc()}")
             finally:
                 # 次のタイマーをスケジュール（エラーがあっても継続）
                 if self.running:
                     logger.info("⏰ Scheduling next statistics display in 10 seconds")
-                    self.stats_timer = threading.Timer(10.0, show_stats)  # 10秒間隔（テスト用）
+                    self.stats_timer = threading.Timer(
+                        10.0, show_stats
+                    )  # 10秒間隔（テスト用）
                     self.stats_timer.daemon = True
                     self.stats_timer.start()
 
@@ -1366,13 +1414,13 @@ class TradeMini:
         self.stats_timer.daemon = True
         self.stats_timer.start()
 
-
-
     async def run(self):
         """メインループ実行"""
         # config.ymlでWebSocket+pingモードが設定されているかチェック
-        websocket_ping_mode = self.config.get('bybit.environment') == 'websocket-ping_only'
-        
+        websocket_ping_mode = (
+            self.config.get("bybit.environment") == "websocket-ping_only"
+        )
+
         if websocket_ping_mode:
             logger.info("🔍 WebSocket+Ping Only Mode (configured in config.yml)")
             logger.info("   - Data processing: DISABLED")
@@ -1381,8 +1429,7 @@ class TradeMini:
             logger.info("   - QuestDB: DISABLED")
             logger.info("   - Only WebSocket receive + ping monitoring")
             logger.info("=" * 60)
-        
-            
+
         logger.info("Starting Trade Mini...")
 
         try:
@@ -1397,17 +1444,19 @@ class TradeMini:
 
             # メインループタスク作成
             main_tasks = []
-            
+
             # WebSocketデータ処理タスク（専用プロセス使用時）
             if self.use_dedicated_websocket_process:
-                websocket_data_task = asyncio.create_task(self._process_websocket_data())
+                websocket_data_task = asyncio.create_task(
+                    self._process_websocket_data()
+                )
                 main_tasks.append(websocket_data_task)
                 logger.info("🔄 WebSocket data processing task started")
-            
+
             # メインループタスク
             main_loop_task = asyncio.create_task(self._main_loop())
             main_tasks.append(main_loop_task)
-            
+
             try:
                 # 全タスクの完了を待つ
                 await asyncio.gather(*main_tasks, return_exceptions=True)
@@ -1431,13 +1480,13 @@ class TradeMini:
     async def _main_loop(self):
         """メインループ処理"""
         last_health_check = time.time()
-        
+
         while self.running and not self.shutdown_event.is_set():
             try:
                 await asyncio.sleep(1.0)
 
                 # 🩺 プロセスヘルスチェック（30秒毎）- WebSocket監視モードでは無効
-                if self.config.get('bybit.environment') != 'websocket-ping_only':
+                if self.config.get("bybit.environment") != "websocket-ping_only":
                     current_time = time.time()
                     if current_time - last_health_check >= 30.0:
                         self._check_multiprocess_health()
@@ -1452,7 +1501,7 @@ class TradeMini:
             except Exception as e:
                 logger.error(f"Error in main loop: {e}")
                 await asyncio.sleep(1.0)
-        
+
         logger.info("Main loop ended")
 
     def _setup_signal_handlers(self):
@@ -1497,7 +1546,9 @@ class TradeMini:
             # 最終統計表示
             # 最終統計をstrategyから表示
             if self.strategy:
-                self.strategy.log_comprehensive_statistics(self.stats["start_time"], self.stats)
+                self.strategy.log_comprehensive_statistics(
+                    self.stats["start_time"], self.stats
+                )
 
             # 各コンポーネントのシャットダウン
             if self.mexc_client:
@@ -1554,7 +1605,7 @@ class TradeMini:
 async def main():
     """メイン関数"""
     import sys
-    
+
     # ヘルプ表示
     if "--help" in sys.argv or "-h" in sys.argv:
         print("🚀 Trade Mini - MEXC/Bybit自動取引システム")
@@ -1571,7 +1622,7 @@ async def main():
         print("  - 受信統計を10秒ごとに表示")
         print("  - マルチプロセスは起動せず軽量動作")
         return
-    
+
     try:
         # マルチプロセス開始方法を設定（Dockerコンテナ対応）
         multiprocessing.set_start_method("fork", force=True)

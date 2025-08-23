@@ -72,11 +72,18 @@ class PositionTracker:
 class TradingStrategy:
     """取引戦略クラス"""
 
-    def __init__(self, config: Config, data_manager: DataManager, 
-                 position_manager=None, questdb_client=None, symbol_mapper=None, main_stats=None):
+    def __init__(
+        self,
+        config: Config,
+        data_manager: DataManager,
+        position_manager=None,
+        questdb_client=None,
+        symbol_mapper=None,
+        main_stats=None,
+    ):
         self.config = config
         self.data_manager = data_manager
-        
+
         # 統計表示用のコンポーネント参照
         self.position_manager = position_manager
         self.questdb_client = questdb_client
@@ -160,7 +167,9 @@ class TradingStrategy:
         # デバッグ用ログ（主要銘柄のみ）
         major_debug_symbols = ["BTCUSDT", "BTC_USDT", "ETHUSDT", "ETH_USDT"]
         if tick.symbol in major_debug_symbols:
-            logger.info(f"{tick.symbol}: change_percent={change_percent}, price={tick.price}")
+            logger.info(
+                f"{tick.symbol}: change_percent={change_percent}, price={tick.price}"
+            )
 
         # 価格変動率をキャッシュ（メイン処理から取得可能に）
         if change_percent is not None:
@@ -422,22 +431,22 @@ class TradingStrategy:
         """指定銘柄の最新価格変動率を取得"""
         with self._lock:
             return self.price_changes.get(symbol, 0.0)
-    
+
     def log_comprehensive_statistics(self, start_time: datetime, main_stats: dict):
         """包括的な統計情報をログ出力"""
         try:
             # アップタイム計算
             uptime = (datetime.now() - start_time).total_seconds()
-            
+
             # 各コンポーネントの統計取得（安全な取得）
             try:
                 data_stats = self.data_manager.get_stats() if self.data_manager else {}
             except Exception as e:
                 logger.debug(f"Failed to get data_manager stats: {e}")
                 data_stats = {}
-                
+
             strategy_stats = self.get_stats()
-            
+
             try:
                 position_stats = (
                     self.position_manager.get_stats() if self.position_manager else {}
@@ -445,7 +454,7 @@ class TradingStrategy:
             except Exception as e:
                 logger.debug(f"Failed to get position_manager stats: {e}")
                 position_stats = {}
-                
+
             try:
                 questdb_stats = (
                     self.questdb_client.get_stats() if self.questdb_client else {}
@@ -453,7 +462,7 @@ class TradingStrategy:
             except Exception as e:
                 logger.debug(f"Failed to get questdb_client stats: {e}")
                 questdb_stats = {}
-                
+
             try:
                 symbol_stats = (
                     self.symbol_mapper.get_mapping_stats() if self.symbol_mapper else {}
@@ -476,7 +485,9 @@ class TradingStrategy:
             logger.info("=== TRADE MINI STATISTICS ===")
             logger.info(f"Uptime: {uptime/3600:.2f} hours")
             logger.info(f"Ticks processed: {main_stats.get('ticks_processed', 0)}")
-            logger.info(f"Signals generated: {strategy_stats.get('signals_generated', 0)}")
+            logger.info(
+                f"Signals generated: {strategy_stats.get('signals_generated', 0)}"
+            )
             logger.info(f"Trades executed: {main_stats.get('trades_executed', 0)}")
 
             logger.info(f"Active symbols: {data_stats.get('active_symbols', 0)}")
@@ -497,28 +508,29 @@ class TradingStrategy:
         except Exception as e:
             logger.error(f"Error logging comprehensive statistics: {e}")
             import traceback
+
             logger.debug(f"Statistics error traceback: {traceback.format_exc()}")
 
     def process_tick_and_execute_trades(self, tick: TickData) -> bool:
         """
         ティックデータを処理して取引を実行
-        
+
         Args:
             tick: ティックデータ
-            
+
         Returns:
             取引が実行されたかどうか
         """
         try:
             # 戦略分析してシグナル生成
             signal = self.analyze_tick(tick)
-            
+
             if signal.signal_type == SignalType.NONE:
                 return False
-                
+
             # シグナルに基づいて取引実行
             return self._execute_trade_from_signal(signal)
-            
+
         except Exception as e:
             logger.error(f"Error processing tick for {tick.symbol}: {e}")
             return False
@@ -526,10 +538,10 @@ class TradingStrategy:
     def _execute_trade_from_signal(self, signal: TradingSignal) -> bool:
         """
         シグナルに基づいて取引を実行
-        
+
         Args:
             signal: 取引シグナル
-            
+
         Returns:
             取引が実行されたかどうか
         """
@@ -542,7 +554,7 @@ class TradingStrategy:
                 return self._execute_close_position(signal)
             else:
                 return False
-                
+
         except Exception as e:
             logger.error(f"Error executing trade from signal for {signal.symbol}: {e}")
             return False
@@ -550,31 +562,38 @@ class TradingStrategy:
     def _execute_long_position(self, signal: TradingSignal) -> bool:
         """ロングポジションを開く"""
         try:
-            logger.info(f"🔥 LONG THRESHOLD REACHED: {signal.symbol} change={signal.reason}")
-            
-            if self.position_manager is None:
-                logger.warning(f"⚠️ POSITION MANAGER DISABLED: {signal.symbol} LONG signal ignored")
-                return False
-                
-            # datetime型のタイムスタンプに変換（ナノ秒から）
-            entry_time = signal.timestamp if isinstance(signal.timestamp, datetime) else datetime.now()
-            
-            success, message, position = self.position_manager.open_position(
-                signal.symbol,
-                "LONG", 
-                signal.price,
-                entry_time
+            logger.info(
+                f"🔥 LONG THRESHOLD REACHED: {signal.symbol} change={signal.reason}"
             )
-            
+
+            if self.position_manager is None:
+                logger.warning(
+                    f"⚠️ POSITION MANAGER DISABLED: {signal.symbol} LONG signal ignored"
+                )
+                return False
+
+            # datetime型のタイムスタンプに変換（ナノ秒から）
+            entry_time = (
+                signal.timestamp
+                if isinstance(signal.timestamp, datetime)
+                else datetime.now()
+            )
+
+            success, message, position = self.position_manager.open_position(
+                signal.symbol, "LONG", signal.price, entry_time
+            )
+
             if success:
-                logger.info(f"✅ LONG POSITION OPENED: {signal.symbol} @ {signal.price}")
+                logger.info(
+                    f"✅ LONG POSITION OPENED: {signal.symbol} @ {signal.price}"
+                )
                 # 戦略側でもポジション追跡開始
                 self.add_position(signal.symbol, "LONG", signal.price, 1.0, entry_time)
                 return True
             else:
                 logger.error(f"❌ LONG POSITION FAILED: {signal.symbol} - {message}")
                 return False
-                
+
         except Exception as e:
             logger.error(f"❌ LONG POSITION ERROR: {signal.symbol} - {e}")
             return False
@@ -582,31 +601,38 @@ class TradingStrategy:
     def _execute_short_position(self, signal: TradingSignal) -> bool:
         """ショートポジションを開く"""
         try:
-            logger.info(f"🔥 SHORT THRESHOLD REACHED: {signal.symbol} change={signal.reason}")
-            
-            if self.position_manager is None:
-                logger.warning(f"⚠️ POSITION MANAGER DISABLED: {signal.symbol} SHORT signal ignored")
-                return False
-                
-            # datetime型のタイムスタンプに変換（ナノ秒から）
-            entry_time = signal.timestamp if isinstance(signal.timestamp, datetime) else datetime.now()
-            
-            success, message, position = self.position_manager.open_position(
-                signal.symbol,
-                "SHORT",
-                signal.price,
-                entry_time
+            logger.info(
+                f"🔥 SHORT THRESHOLD REACHED: {signal.symbol} change={signal.reason}"
             )
-            
+
+            if self.position_manager is None:
+                logger.warning(
+                    f"⚠️ POSITION MANAGER DISABLED: {signal.symbol} SHORT signal ignored"
+                )
+                return False
+
+            # datetime型のタイムスタンプに変換（ナノ秒から）
+            entry_time = (
+                signal.timestamp
+                if isinstance(signal.timestamp, datetime)
+                else datetime.now()
+            )
+
+            success, message, position = self.position_manager.open_position(
+                signal.symbol, "SHORT", signal.price, entry_time
+            )
+
             if success:
-                logger.info(f"✅ SHORT POSITION OPENED: {signal.symbol} @ {signal.price}")
+                logger.info(
+                    f"✅ SHORT POSITION OPENED: {signal.symbol} @ {signal.price}"
+                )
                 # 戦略側でもポジション追跡開始
                 self.add_position(signal.symbol, "SHORT", signal.price, 1.0, entry_time)
                 return True
             else:
                 logger.error(f"❌ SHORT POSITION FAILED: {signal.symbol} - {message}")
                 return False
-                
+
         except Exception as e:
             logger.error(f"❌ SHORT POSITION ERROR: {signal.symbol} - {e}")
             return False
@@ -615,16 +641,17 @@ class TradingStrategy:
         """ポジションを決済"""
         try:
             logger.info(f"🔥 CLOSE SIGNAL: {signal.symbol} reason={signal.reason}")
-            
+
             if self.position_manager is None:
-                logger.warning(f"⚠️ POSITION MANAGER DISABLED: {signal.symbol} CLOSE signal ignored")
+                logger.warning(
+                    f"⚠️ POSITION MANAGER DISABLED: {signal.symbol} CLOSE signal ignored"
+                )
                 return False
-                
+
             success, message, position = self.position_manager.close_position(
-                signal.symbol,
-                signal.reason
+                signal.symbol, signal.reason
             )
-            
+
             if success:
                 logger.info(f"✅ POSITION CLOSED: {signal.symbol} @ {signal.price}")
                 # 戦略側でもポジション追跡終了
@@ -633,7 +660,7 @@ class TradingStrategy:
             else:
                 logger.error(f"❌ CLOSE POSITION FAILED: {signal.symbol} - {message}")
                 return False
-                
+
         except Exception as e:
             logger.error(f"❌ CLOSE POSITION ERROR: {signal.symbol} - {e}")
             return False

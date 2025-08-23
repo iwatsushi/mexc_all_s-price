@@ -19,9 +19,9 @@ class SymbolMapper:
     # 特殊マッピングケース（実際のBybit銘柄に基づく修正版）
     MEXC_TO_BYBIT_SPECIAL_CASES = {
         # 1000倍表記の特殊ケース（実際のBybit銘柄名で修正）
-        "SHIB_USDT": "SHIB1000USDT",     # 実際のBybitはSHIB1000USDT
+        "SHIB_USDT": "SHIB1000USDT",  # 実際のBybitはSHIB1000USDT
         "PEPE_USDT": "1000PEPEUSDT",
-        "BONK_USDT": "1000BONKUSDT",     # 両者とも1000BONKなので正しい
+        "BONK_USDT": "1000BONKUSDT",  # 両者とも1000BONKなので正しい
         "FLOKI_USDT": "1000FLOKIUSDT",
         "LUNC_USDT": "1000LUNCUSDT",
         "XEC_USDT": "1000XECUSDT",
@@ -35,15 +35,13 @@ class SymbolMapper:
         "COQ_USDT": "10000COQUSDT",
         "WHY_USDT": "10000WHYUSDT",
         "WEN_USDT": "10000WENUSDT",
-        
         # 名称変更・リブランディング（実際のBybit銘柄名で確認済み）
         "FILECOIN_USDT": "FILUSDT",
-        "RAY_USDT": "RAYDIUMUSDT", 
-        "LUNA_USDT": "LUNA2USDT",        # 実際のBybitはLUNA2USDT
+        "RAY_USDT": "RAYDIUMUSDT",
+        "LUNA_USDT": "LUNA2USDT",  # 実際のBybitはLUNA2USDT
         "TERRA_USDT": "LUNA2USDT",
         "POLYGON_USDT": "POLUSDT",
         "MATIC_USDT": "POLUSDT",
-        
         # 特殊命名パターン
         "AVAX_USD": "AVAXUSDT",
         "BTC_USD": "BTCUSDT",
@@ -52,7 +50,6 @@ class SymbolMapper:
         "DOGE_USD": "DOGEUSDT",
         "ADA_USD": "ADAUSDT",
         "NEAR_USD": "NEARUSDT",
-        
         # プレフィックス付きケース
         "BNB_USDC": "BNBUSDT",
         "ETH_USDC": "ETHUSDT",
@@ -99,8 +96,8 @@ class SymbolMapper:
 
         # 銘柄状態管理（後から上場対応）
         self.symbol_status = {
-            "failed_mapping": {},      # マッピング失敗銘柄: {symbol: last_check_time}
-            "mexc_exclusive": {},      # MEXC専用銘柄: {symbol: last_check_time}
+            "failed_mapping": {},  # マッピング失敗銘柄: {symbol: last_check_time}
+            "mexc_exclusive": {},  # MEXC専用銘柄: {symbol: last_check_time}
             "pending_recheck": set(),  # 再チェック待ち銘柄
         }
 
@@ -162,10 +159,10 @@ class SymbolMapper:
     def _convert_mexc_to_bybit(self, mexc_symbol: str) -> str:
         """
         MEXCシンボルをBybitシンボルに変換（改良版）
-        
+
         Args:
             mexc_symbol: MEXCシンボル
-            
+
         Returns:
             対応するBybitシンボル
         """
@@ -175,21 +172,21 @@ class SymbolMapper:
             converted = self.MEXC_TO_BYBIT_SPECIAL_CASES[mexc_symbol]
             logger.debug(f"Special case mapping: {mexc_symbol} -> {converted}")
             return converted
-        
+
         # 2. 近似マッピングをチェック
         if mexc_symbol in self.MEXC_TO_BYBIT_APPROXIMATE:
             self.mapping_stats["approximate_matches"] += 1
             converted = self.MEXC_TO_BYBIT_APPROXIMATE[mexc_symbol]
             logger.debug(f"Approximate mapping: {mexc_symbol} -> {converted}")
             return converted
-        
+
         # 3. 基本変換：アンダースコア除去
         if mexc_symbol.endswith("_USDT"):
             self.mapping_stats["basic_conversions"] += 1
             converted = mexc_symbol.replace("_USDT", "USDT")
             logger.debug(f"Basic conversion: {mexc_symbol} -> {converted}")
             return converted
-        
+
         # 4. USD -> USDT変換
         if mexc_symbol.endswith("_USD"):
             self.mapping_stats["basic_conversions"] += 1
@@ -197,7 +194,7 @@ class SymbolMapper:
             converted = f"{base}USDT"
             logger.debug(f"USD to USDT conversion: {mexc_symbol} -> {converted}")
             return converted
-        
+
         # 5. USDC -> USDT変換
         if mexc_symbol.endswith("_USDC"):
             self.mapping_stats["basic_conversions"] += 1
@@ -205,7 +202,7 @@ class SymbolMapper:
             converted = f"{base}USDT"
             logger.debug(f"USDC to USDT conversion: {mexc_symbol} -> {converted}")
             return converted
-        
+
         # 6. そのまま返す（変換不能）
         self.mapping_stats["failed_mappings"] += 1
         logger.debug(f"No conversion available for: {mexc_symbol}")
@@ -215,7 +212,7 @@ class SymbolMapper:
         """BybitシンボルをMEXCシンボルに変換"""
         # 特殊ケースの逆マッピング（実際のBybit銘柄名で修正）
         special_cases_reverse = {
-            "SHIB1000USDT": "SHIB_USDT",     # 修正: 実際のBybitはSHIB1000USDT
+            "SHIB1000USDT": "SHIB_USDT",  # 修正: 実際のBybitはSHIB1000USDT
             "1000PEPEUSDT": "PEPE_USDT",
             "1000BONKUSDT": "BONK_USDT",
             "1000FLOKIUSDT": "FLOKI_USDT",
@@ -224,13 +221,13 @@ class SymbolMapper:
             "1000TURBOUSDT": "TURBO_USDT",
             "FILUSDT": "FILECOIN_USDT",
             "RAYDIUMUSDT": "RAY_USDT",
-            "LUNA2USDT": "LUNA_USDT",        # 確認済み: BybitはLUNA2USDT
+            "LUNA2USDT": "LUNA_USDT",  # 確認済み: BybitはLUNA2USDT
         }
-        
+
         # 特殊ケースをチェック
         if bybit_symbol in special_cases_reverse:
             return special_cases_reverse[bybit_symbol]
-        
+
         # 基本変換
         if bybit_symbol.endswith("USDT"):
             base = bybit_symbol[:-4]
@@ -336,7 +333,9 @@ class SymbolMapper:
                 logger.debug(f"Symbol {mexc_symbol} recently checked as MEXC-exclusive")
                 return False
             else:
-                logger.info(f"🔄 Re-checking previously MEXC-exclusive symbol: {mexc_symbol}")
+                logger.info(
+                    f"🔄 Re-checking previously MEXC-exclusive symbol: {mexc_symbol}"
+                )
 
         # 過去にマッピング失敗したが、再チェック期間が経過した場合は再試行
         if mexc_symbol in self.symbol_status["failed_mapping"]:
@@ -349,7 +348,9 @@ class SymbolMapper:
 
         # MEXC専用銘柄チェック（厳格なパターンのみ事前除外）
         if self._is_strictly_mexc_exclusive(mexc_symbol):
-            logger.debug(f"Symbol {mexc_symbol} is strictly MEXC-exclusive, skipping Bybit check")
+            logger.debug(
+                f"Symbol {mexc_symbol} is strictly MEXC-exclusive, skipping Bybit check"
+            )
             with self._lock:
                 self.symbol_status["mexc_exclusive"][mexc_symbol] = current_time
             return False
@@ -358,26 +359,30 @@ class SymbolMapper:
         try:
             # 複数の変換パターンを試す（新銘柄対応）
             conversion_candidates = self._generate_conversion_candidates(mexc_symbol)
-            
+
             for bybit_candidate in conversion_candidates:
-                is_available = self.bybit_client.check_symbol_availability(bybit_candidate)
-                
+                is_available = self.bybit_client.check_symbol_availability(
+                    bybit_candidate
+                )
+
                 if is_available:
                     with self._lock:
                         self.mexc_to_bybit[mexc_symbol] = bybit_candidate
                         self.tradeable_mexc_symbols.add(mexc_symbol)
-                        
+
                         # 成功時は失敗記録から削除
                         self.symbol_status["failed_mapping"].pop(mexc_symbol, None)
                         self.symbol_status["mexc_exclusive"].pop(mexc_symbol, None)
-                        
+
                         # 新しいマッピングパターンを学習
                         self._learn_new_mapping_pattern(mexc_symbol, bybit_candidate)
-                        
-                        logger.info(f"🆕 New symbol mapping discovered: {mexc_symbol} -> {bybit_candidate}")
-                    
+
+                        logger.info(
+                            f"🆕 New symbol mapping discovered: {mexc_symbol} -> {bybit_candidate}"
+                        )
+
                     return True
-            
+
             # どの変換候補も見つからない場合
             with self._lock:
                 if self.is_mexc_exclusive_symbol(mexc_symbol):
@@ -385,8 +390,10 @@ class SymbolMapper:
                     logger.info(f"❌ Symbol {mexc_symbol} confirmed as MEXC exclusive")
                 else:
                     self.symbol_status["failed_mapping"][mexc_symbol] = current_time
-                    logger.info(f"❌ Symbol {mexc_symbol} mapping failed, will retry in 24h")
-            
+                    logger.info(
+                        f"❌ Symbol {mexc_symbol} mapping failed, will retry in 24h"
+                    )
+
             return False
 
         except Exception as e:
@@ -398,50 +405,49 @@ class SymbolMapper:
     def _generate_conversion_candidates(self, mexc_symbol: str) -> List[str]:
         """
         新銘柄のための変換候補を生成
-        
+
         Args:
             mexc_symbol: MEXCシンボル
-            
+
         Returns:
             可能性のあるBybit銘柄名のリスト
         """
         candidates = []
-        
+
         # 1. 基本変換（アンダースコア除去）
         basic_conversion = self._convert_mexc_to_bybit(mexc_symbol)
         candidates.append(basic_conversion)
-        
+
         if mexc_symbol.endswith("_USDT"):
             base_symbol = mexc_symbol.replace("_USDT", "")
-            
+
             # 2. 1000倍表記のパターン
-            candidates.extend([
-                f"1000{base_symbol}USDT",
-                f"{base_symbol}1000USDT",
-                f"10000{base_symbol}USDT",
-                f"{base_symbol}10000USDT"
-            ])
-            
+            candidates.extend(
+                [
+                    f"1000{base_symbol}USDT",
+                    f"{base_symbol}1000USDT",
+                    f"10000{base_symbol}USDT",
+                    f"{base_symbol}10000USDT",
+                ]
+            )
+
             # 3. 略称パターン（最初の3-4文字）
             if len(base_symbol) > 4:
                 short_name = base_symbol[:3]
                 candidates.append(f"{short_name}USDT")
                 short_name = base_symbol[:4]
                 candidates.append(f"{short_name}USDT")
-            
+
             # 4. 数字サフィックスパターン
-            candidates.extend([
-                f"{base_symbol}2USDT",
-                f"{base_symbol}3USDT"
-            ])
-        
+            candidates.extend([f"{base_symbol}2USDT", f"{base_symbol}3USDT"])
+
         # 重複を除去して返す
         return list(set(candidates))
 
     def _learn_new_mapping_pattern(self, mexc_symbol: str, bybit_symbol: str):
         """
         新しいマッピングパターンを学習して将来の予測に活用
-        
+
         Args:
             mexc_symbol: MEXCシンボル
             bybit_symbol: Bybitシンボル
@@ -450,190 +456,221 @@ class SymbolMapper:
         if mexc_symbol.endswith("_USDT") and bybit_symbol.endswith("USDT"):
             mexc_base = mexc_symbol.replace("_USDT", "")
             bybit_base = bybit_symbol.replace("USDT", "")
-            
+
             # 1000倍表記パターンの検出
             if bybit_base.startswith("1000") and bybit_base[4:] == mexc_base:
                 logger.info(f"📈 Learned 1000x pattern: {mexc_base} -> 1000{mexc_base}")
             elif bybit_base.endswith("1000") and bybit_base[:-4] == mexc_base:
-                logger.info(f"📈 Learned reverse 1000x pattern: {mexc_base} -> {mexc_base}1000")
-            
+                logger.info(
+                    f"📈 Learned reverse 1000x pattern: {mexc_base} -> {mexc_base}1000"
+                )
+
             # 略称パターンの検出
             elif len(mexc_base) > len(bybit_base) and mexc_base.startswith(bybit_base):
-                logger.info(f"📈 Learned abbreviation pattern: {mexc_base} -> {bybit_base}")
+                logger.info(
+                    f"📈 Learned abbreviation pattern: {mexc_base} -> {bybit_base}"
+                )
 
     def is_mexc_exclusive_symbol(self, mexc_symbol: str) -> bool:
         """
         MEXCにのみ存在する銘柄かどうかを判定（拡張版）
-        
+
         Args:
             mexc_symbol: MEXCシンボル
-            
+
         Returns:
             MEXC専用銘柄かどうか
         """
         # 既知のMEXC専用銘柄パターン
         mexc_exclusive_patterns = [
             # 株式トークン
-            "STOCK_USDT", "AAPLSTOCK_USDT", "CVNASTOCK_USDT",
-            
+            "STOCK_USDT",
+            "AAPLSTOCK_USDT",
+            "CVNASTOCK_USDT",
             # 政治・ミーム系トークン
-            "TRUMP_USDT", "BIDEN_USDT", "FARTBOY_USDT", "ELON_USDT", "GROK_USDT",
-            
+            "TRUMP_USDT",
+            "BIDEN_USDT",
+            "FARTBOY_USDT",
+            "ELON_USDT",
+            "GROK_USDT",
             # その他のMEXC専用
-            "TST_USDT", "BOSS_USDT", "HOUSE_USDT", "TOKEN_USDT", "TEST_USDT",
-            
+            "TST_USDT",
+            "BOSS_USDT",
+            "HOUSE_USDT",
+            "TOKEN_USDT",
+            "TEST_USDT",
             # 一般的なテスト用トークン
-            "TESTNET_USDT", "DEMO_USDT"
+            "TESTNET_USDT",
+            "DEMO_USDT",
         ]
-        
+
         # パターンマッチング
         for pattern in mexc_exclusive_patterns:
             if pattern in mexc_symbol or mexc_symbol in pattern:
                 return True
-        
+
         # 銘柄名による推定
         if mexc_symbol.endswith("_USDT"):
             base = mexc_symbol.replace("_USDT", "")
-            
+
             # 株式銘柄パターン
             if "STOCK" in base or base in ["AAPL", "TSLA", "GOOGL", "MSFT", "AMZN"]:
                 return True
-            
+
             # 政治系パターン
             if base in ["TRUMP", "BIDEN", "MAGA", "USA", "POLITICAL"]:
                 return True
-                
+
             # ミーム系の特殊パターン
             if base in ["FARTBOY", "URANUS", "SCAM", "RUG"]:
                 return True
-        
+
         return False
 
     def get_mexc_exclusive_symbols(self) -> List[str]:
         """MEXC専用銘柄のリストを取得"""
         exclusive_symbols = []
-        
+
         # 既知の専用銘柄
         known_exclusive = [
-            "TRUMP_USDT", "FARTBOY_USDT", "ELON_USDT", "GROK_USDT",
-            "AAPLSTOCK_USDT", "CVNASTOCK_USDT", "ICGSTOCK_USDT", 
-            "TST_USDT", "BOSS_USDT", "HOUSE_USDT", "TOKEN_USDT"
+            "TRUMP_USDT",
+            "FARTBOY_USDT",
+            "ELON_USDT",
+            "GROK_USDT",
+            "AAPLSTOCK_USDT",
+            "CVNASTOCK_USDT",
+            "ICGSTOCK_USDT",
+            "TST_USDT",
+            "BOSS_USDT",
+            "HOUSE_USDT",
+            "TOKEN_USDT",
         ]
-        
+
         exclusive_symbols.extend(known_exclusive)
-        
+
         # キャッシュから判定可能なものを追加
         with self._lock:
             for symbol in self.mexc_to_bybit.keys():
                 if self.is_mexc_exclusive_symbol(symbol):
                     exclusive_symbols.append(symbol)
-        
+
         return list(set(exclusive_symbols))
 
     def auto_discover_new_symbols(self, mexc_symbols: List[str]) -> Dict[str, str]:
         """
         新しいMEXC銘柄を自動発見してマッピングを試行
-        
+
         Args:
             mexc_symbols: MEXCで見つかった新銘柄リスト
-            
+
         Returns:
             発見された新しいマッピング
         """
         new_mappings = {}
-        
+
         for mexc_symbol in mexc_symbols:
             # まだマッピングされていない銘柄のみ処理
             if not self.is_tradeable_on_bybit(mexc_symbol):
                 logger.info(f"🔍 Discovering new symbol: {mexc_symbol}")
-                
+
                 if self.check_symbol_realtime(mexc_symbol):
                     bybit_symbol = self.get_bybit_symbol(mexc_symbol)
                     new_mappings[mexc_symbol] = bybit_symbol
                     logger.info(f"✅ New mapping: {mexc_symbol} -> {bybit_symbol}")
                 else:
                     logger.info(f"❌ Symbol {mexc_symbol} not available on Bybit")
-        
+
         return new_mappings
 
     def _is_strictly_mexc_exclusive(self, mexc_symbol: str) -> bool:
         """
         厳格にMEXC専用と判定できる銘柄（後から他の取引所で上場する可能性が低い）
-        
+
         Args:
             mexc_symbol: MEXCシンボル
-            
+
         Returns:
             厳格にMEXC専用かどうか
         """
         if mexc_symbol.endswith("_USDT"):
             base = mexc_symbol.replace("_USDT", "")
-            
+
             # 株式トークンは基本的にMEXC専用
-            if "STOCK" in base or base in ["AAPL", "TSLA", "GOOGL", "MSFT", "AMZN", "NVDA"]:
+            if "STOCK" in base or base in [
+                "AAPL",
+                "TSLA",
+                "GOOGL",
+                "MSFT",
+                "AMZN",
+                "NVDA",
+            ]:
                 return True
-            
+
             # 政治系トークンも基本的にMEXC専用
             if base in ["TRUMP", "BIDEN", "MAGA"]:
                 return True
-                
+
             # 明らかなジョークトークン
             if base in ["FARTBOY", "SCAM", "RUG", "PONZI"]:
                 return True
-        
+
         return False
 
     def periodic_recheck_failed_symbols(self) -> Dict[str, str]:
         """
         定期的な失敗銘柄の再チェック
-        
+
         Returns:
             新たにマッピングできた銘柄の辞書
         """
         current_time = time.time()
         new_mappings = {}
         recheck_candidates = []
-        
+
         with self._lock:
             # 再チェック対象の収集
             for symbol, last_check in self.symbol_status["failed_mapping"].items():
                 if current_time - last_check >= self._recheck_interval:
                     recheck_candidates.append(symbol)
-            
+
             for symbol, last_check in self.symbol_status["mexc_exclusive"].items():
                 if current_time - last_check >= self._recheck_interval:
                     if not self._is_strictly_mexc_exclusive(symbol):
                         recheck_candidates.append(symbol)
-        
+
         if not recheck_candidates:
             logger.debug("No symbols need rechecking")
             return new_mappings
-        
-        logger.info(f"🔄 Rechecking {len(recheck_candidates)} previously failed symbols")
-        
+
+        logger.info(
+            f"🔄 Rechecking {len(recheck_candidates)} previously failed symbols"
+        )
+
         for mexc_symbol in recheck_candidates:
             logger.info(f"🔍 Rechecking symbol: {mexc_symbol}")
-            
+
             # 再チェック実行
             if self.check_symbol_realtime(mexc_symbol):
                 bybit_symbol = self.get_bybit_symbol(mexc_symbol)
                 new_mappings[mexc_symbol] = bybit_symbol
-                logger.info(f"✅ Previously failed symbol now available: {mexc_symbol} -> {bybit_symbol}")
-            
+                logger.info(
+                    f"✅ Previously failed symbol now available: {mexc_symbol} -> {bybit_symbol}"
+                )
+
             # API制限を避けるため少し待機
             time.sleep(0.1)
-        
+
         if new_mappings:
             logger.info(f"🎉 Recheck discovered {len(new_mappings)} new mappings!")
         else:
             logger.info("No new mappings discovered during recheck")
-        
+
         return new_mappings
 
     def schedule_symbol_for_recheck(self, mexc_symbol: str):
         """
         銘柄を再チェック対象に追加
-        
+
         Args:
             mexc_symbol: 再チェックする銘柄
         """
@@ -644,66 +681,77 @@ class SymbolMapper:
     def get_failed_symbols_stats(self) -> Dict[str, any]:
         """
         失敗した銘柄の統計情報を取得
-        
+
         Returns:
             統計情報の辞書
         """
         current_time = time.time()
-        
+
         with self._lock:
             failed_count = len(self.symbol_status["failed_mapping"])
             mexc_exclusive_count = len(self.symbol_status["mexc_exclusive"])
             pending_recheck_count = len(self.symbol_status["pending_recheck"])
-            
+
             # 再チェック期間が過ぎた銘柄数
             failed_ready_for_recheck = sum(
-                1 for last_check in self.symbol_status["failed_mapping"].values()
+                1
+                for last_check in self.symbol_status["failed_mapping"].values()
                 if current_time - last_check >= self._recheck_interval
             )
-            
+
             mexc_ready_for_recheck = sum(
-                1 for symbol, last_check in self.symbol_status["mexc_exclusive"].items()
-                if (current_time - last_check >= self._recheck_interval and 
-                    not self._is_strictly_mexc_exclusive(symbol))
+                1
+                for symbol, last_check in self.symbol_status["mexc_exclusive"].items()
+                if (
+                    current_time - last_check >= self._recheck_interval
+                    and not self._is_strictly_mexc_exclusive(symbol)
+                )
             )
-            
+
             return {
                 "failed_mapping_count": failed_count,
                 "mexc_exclusive_count": mexc_exclusive_count,
                 "pending_recheck_count": pending_recheck_count,
                 "failed_ready_for_recheck": failed_ready_for_recheck,
                 "mexc_ready_for_recheck": mexc_ready_for_recheck,
-                "total_ready_for_recheck": failed_ready_for_recheck + mexc_ready_for_recheck,
+                "total_ready_for_recheck": failed_ready_for_recheck
+                + mexc_ready_for_recheck,
                 "recheck_interval_hours": self._recheck_interval / 3600,
-                "sample_failed_symbols": list(self.symbol_status["failed_mapping"].keys())[:5],
-                "sample_mexc_exclusive": list(self.symbol_status["mexc_exclusive"].keys())[:5],
+                "sample_failed_symbols": list(
+                    self.symbol_status["failed_mapping"].keys()
+                )[:5],
+                "sample_mexc_exclusive": list(
+                    self.symbol_status["mexc_exclusive"].keys()
+                )[:5],
             }
 
     def manual_recheck_symbol(self, mexc_symbol: str) -> bool:
         """
         指定された銘柄を手動で再チェック
-        
+
         Args:
             mexc_symbol: 再チェックする銘柄
-            
+
         Returns:
             再チェック結果（成功/失敗）
         """
         logger.info(f"🔍 Manual recheck requested for: {mexc_symbol}")
-        
+
         # 既存の記録をクリア
         with self._lock:
             self.symbol_status["failed_mapping"].pop(mexc_symbol, None)
             self.symbol_status["mexc_exclusive"].pop(mexc_symbol, None)
             self.symbol_status["pending_recheck"].discard(mexc_symbol)
-        
+
         # 再チェック実行
         result = self.check_symbol_realtime(mexc_symbol)
-        
+
         if result:
             bybit_symbol = self.get_bybit_symbol(mexc_symbol)
-            logger.info(f"✅ Manual recheck successful: {mexc_symbol} -> {bybit_symbol}")
+            logger.info(
+                f"✅ Manual recheck successful: {mexc_symbol} -> {bybit_symbol}"
+            )
         else:
             logger.info(f"❌ Manual recheck failed: {mexc_symbol}")
-        
+
         return result
