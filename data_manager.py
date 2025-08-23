@@ -31,6 +31,10 @@ class SymbolTickData:
 
         # 最新データのキャッシュ
         self.latest_tick: Optional[TickData] = None
+        
+        # 🚀 クリーンアップ頻度制御
+        self.last_cleanup_time = 0
+        self.cleanup_interval = 300  # 5分に1回のみ
 
         # 統計情報
         self.stats = {
@@ -44,9 +48,15 @@ class SymbolTickData:
         self._lock = threading.Lock()
 
     def add_tick(self, tick: TickData):
-        """ティックデータを追加"""
+        """ティックデータを追加（詳細測定付き）"""
+        import time as timing_module  # 内部測定用
+        add_start = timing_module.time()
+        
         with self._lock:
+            lock_acquired = timing_module.time()
+            
             # 重複データのチェック
+            duplicate_check_start = timing_module.time()
             if tick.timestamp in self.timestamp_index:
                 # 価格が更新された場合のみ処理
                 existing_tick = self.timestamp_index[tick.timestamp]
@@ -56,14 +66,18 @@ class SymbolTickData:
                     existing_tick.volume = tick.volume
                     self.stats["price_updates"] += 1
                 return
+            duplicate_check_elapsed = timing_module.time() - duplicate_check_start
 
             # 新しいティックデータを追加
+            append_start = timing_module.time()
             self.tick_data.append(tick)
             self.timestamp_index[tick.timestamp] = tick
             self.latest_tick = tick
             self.stats["total_ticks"] += 1
+            append_elapsed = timing_module.time() - append_start
 
             # 統計更新
+            stats_start = timing_module.time()
             if (
                 not self.stats["oldest_tick"]
                 or tick.timestamp < self.stats["oldest_tick"]
@@ -74,9 +88,30 @@ class SymbolTickData:
                 or tick.timestamp > self.stats["newest_tick"]
             ):
                 self.stats["newest_tick"] = tick.timestamp
+            stats_elapsed = timing_module.time() - stats_start
 
-            # 古いデータの削除
-            self._cleanup_old_data()
+            # 🚀 クリーンアップ頻度制御（5分に1回のみ）
+            cleanup_start = timing_module.time()
+            current_time = timing_module.time()
+            if current_time - self.last_cleanup_time > self.cleanup_interval:
+                self._cleanup_old_data()
+                self.last_cleanup_time = current_time
+            cleanup_elapsed = timing_module.time() - cleanup_start
+            
+        total_elapsed = timing_module.time() - add_start
+        lock_wait_time = lock_acquired - add_start
+        
+        # 🔍 異常に遅い処理の詳細分析（10ms以上）
+        if total_elapsed > 0.01:
+            print(f"🔍 add_tick BREAKDOWN for {self.symbol}:")
+            print(f"  Total: {total_elapsed*1000:.2f}ms")
+            print(f"  Lock wait: {lock_wait_time*1000:.2f}ms")
+            print(f"  Duplicate check: {duplicate_check_elapsed*1000:.2f}ms")
+            print(f"  Data append: {append_elapsed*1000:.2f}ms") 
+            print(f"  Stats update: {stats_elapsed*1000:.2f}ms")
+            print(f"  Cleanup: {cleanup_elapsed*1000:.2f}ms")
+            print(f"  Data count: {len(self.tick_data)}")
+            print("", flush=True)
 
     def _cleanup_old_data(self):
         """古いデータを削除（retention_hours を超えたデータ）"""
