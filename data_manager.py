@@ -96,46 +96,41 @@ class SymbolTickData:
             self.stats["oldest_tick"] = self.tick_data[0].timestamp
 
     def get_price_n_seconds_ago(self, n_seconds: int) -> Optional[float]:
-        """N秒前の価格を取得"""
+        """🚀 N秒前の価格を高速取得（早期終了版）"""
         with self._lock:
-            if not self.latest_tick:
+            if not self.latest_tick or len(self.tick_data) < 2:
                 return None
 
-            # int型（ナノ秒）であることを確認
             if not isinstance(self.latest_tick.timestamp, int):
-                logger.warning(
-                    f"{self.symbol}: Invalid timestamp type: {type(self.latest_tick.timestamp)}"
-                )
                 return None
 
             try:
-                # n_seconds前のナノ秒タイムスタンプを計算
-                target_time_ns = self.latest_tick.timestamp - (
-                    n_seconds * 1_000_000_000
-                )
-            except (TypeError, AttributeError) as e:
-                logger.warning(f"{self.symbol}: Timestamp calculation error: {e}")
+                target_time_ns = self.latest_tick.timestamp - (n_seconds * 1_000_000_000)
+            except (TypeError, AttributeError):
                 return None
 
-            # 最も近い過去の価格を探す
+            # 🚀 逆順検索 + 早期終了で高速化
             closest_tick = None
             min_time_diff_ns = float("inf")
-
-            for tick in reversed(self.tick_data):  # 新しいものから検索
+            
+            for tick in reversed(self.tick_data):
                 if not isinstance(tick.timestamp, int):
                     continue
 
-                try:
-                    time_diff_ns = abs(tick.timestamp - target_time_ns)
-                    if time_diff_ns < min_time_diff_ns:
-                        min_time_diff_ns = time_diff_ns
-                        closest_tick = tick
-
-                    # target_timeより古くなったら検索終了
-                    if tick.timestamp < target_time_ns:
+                time_diff_ns = abs(tick.timestamp - target_time_ns)
+                
+                # より良い候補が見つかったら更新
+                if time_diff_ns < min_time_diff_ns:
+                    min_time_diff_ns = time_diff_ns
+                    closest_tick = tick
+                    
+                    # 🚀 十分に近い値が見つかったら早期終了
+                    if time_diff_ns < 100_000_000:  # 0.1秒以内なら十分
                         break
-                except (TypeError, AttributeError):
-                    continue
+
+                # 目標時刻を大幅に過ぎたら検索終了
+                if tick.timestamp < target_time_ns - 5_000_000_000:  # 5秒以上古い
+                    break
 
             return closest_tick.price if closest_tick else None
 
@@ -148,24 +143,14 @@ class SymbolTickData:
         """N秒前からの価格変動率（%）を計算"""
         with self._lock:
             if not self.latest_tick:
-                logger.info(f"{self.symbol}: No latest tick available")
                 return None
 
             past_price = self.get_price_n_seconds_ago(n_seconds)
             if past_price is None or past_price == 0:
-                logger.info(
-                    f"{self.symbol}: No past price for {n_seconds}s ago (data count: {len(self.tick_data)})"
-                )
                 return None
 
             current_price = self.latest_tick.price
             change_percent = ((current_price - past_price) / past_price) * 100.0
-
-            # デバッグ情報（変動率が0でない場合のみ）
-            if abs(change_percent) > 0.001:
-                logger.debug(
-                    f"{self.symbol}: {change_percent:.3f}% change ({current_price:.6f} vs {past_price:.6f})"
-                )
 
             return change_percent
 

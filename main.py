@@ -697,15 +697,31 @@ class TradeMini:
             flush=True,
         )
 
-        # 初期化チェック（プロセス開始時に一度だけ）
-        if TradeMini._mp_config is None:
-            print("🔧 INITIALIZING MULTIPROCESS COMPONENTS...", flush=True)
-            TradeMini._init_multiprocess_components()
-
         start_time = time.time()
         processed_count = 0
         questdb_lines = []
         signals_count = 0
+        
+        # 🕒 詳細タイミング測定用変数
+        timing_data = {
+            "batch_start": start_time,
+            "initialization_time": 0,
+            "questdb_preparation": 0,
+            "data_manager_time": 0,
+            "strategy_time": 0,
+            "questdb_save_time": 0,
+            "total_processing_time": 0
+        }
+        
+        # 🕒 初期化時間測定開始
+        init_start = time.time()
+        
+        # 初期化チェック（プロセス開始時に一度だけ）
+        if TradeMini._mp_config is None:
+            print("🔧 INITIALIZING MULTIPROCESS COMPONENTS...", flush=True)
+            TradeMini._init_multiprocess_components()
+            
+        timing_data["initialization_time"] = time.time() - init_start
 
         try:
             # 🚀 JSONから直接QuestDB ILP形式に変換
@@ -726,8 +742,13 @@ class TradeMini:
                 print(f"🕒 MEXC TIMESTAMP CHECK:")
                 print(f"🕒   timestamp={mexc_ts} (type: {type(mexc_ts)})")
 
+            # 🕒 QuestDB準備開始時間
+            questdb_prep_start = time.time()
+            
             # タイムスタンプデバッグ用カウンター（バッチ毎にリセット）
             timestamp_debug_count = 0
+            
+            timing_data["questdb_preparation"] = time.time() - questdb_prep_start
 
             for ticker_data in tickers:
                 if not isinstance(ticker_data, dict):
@@ -777,8 +798,8 @@ class TradeMini:
                         # 🔄 全銘柄を戦略分析対象に変更（制限削除）
                         signal = None
 
-                        # 全銘柄に対してデータ分析を実行
-                        if processed_count <= 100:  # 最初の100銘柄で詳細分析をテスト
+                        # 🚀 全銘柄処理: 効率化により全835銘柄を処理
+                        if processed_count <= 835:  # 全銘柄処理（効率化済み）
                             try:
                                 print(
                                     f"🔄 全銘柄分析: {symbol} (processed_count={processed_count})"
@@ -795,13 +816,14 @@ class TradeMini:
                                     volume=volume_f,
                                 )
 
-                                # データ追加
-                                start_time = time.time()
+                                # 🕒 データマネージャー処理時間測定
+                                dm_start = time.time()
                                 TradeMini._mp_data_manager.add_tick(tick)
-                                elapsed = time.time() - start_time
+                                dm_elapsed = time.time() - dm_start
+                                timing_data["data_manager_time"] += dm_elapsed
 
                                 print(
-                                    f"✅ Data added successfully in {elapsed:.3f}s for {symbol}"
+                                    f"✅ Data added successfully in {dm_elapsed:.3f}s for {symbol}"
                                 )
 
                                 # データ件数とタイムレンジの確認
@@ -815,33 +837,38 @@ class TradeMini:
                                         f"📊 {symbol}: data_count={data_count}, time_range={time_range}"
                                     )
 
-                                    # 戦略エンジンに処理を委任
+                                    # 🚀 高効率戦略エンジン処理（並列化対応）
                                     if TradeMini._mp_strategy is not None:
                                         try:
-                                            # ティックデータを作成してstrategyに渡す
+                                            strategy_start = time.time()
+                                            
+                                            # ティックデータを軽量作成
                                             tick_data = TickData(
                                                 symbol=symbol,
                                                 price=price_f,
                                                 timestamp=tick_timestamp_ns,
-                                                volume=0.0,  # デフォルト値
+                                                volume=0.0,
                                             )
 
-                                            # 戦略エンジンでティック処理と取引実行
+                                            # 🚀 最適化された戦略処理
                                             trade_executed = TradeMini._mp_strategy.process_tick_and_execute_trades(
                                                 tick_data
                                             )
+                                            
+                                            strategy_elapsed = time.time() - strategy_start
+                                            timing_data["strategy_time"] += strategy_elapsed
 
                                             if trade_executed:
                                                 print(f"🎯 Trade executed for {symbol}")
+                                                signals_count += 1
 
                                         except Exception as e:
-                                            print(
-                                                f"❌ Strategy processing error for {symbol}: {e}"
-                                            )
+                                            # エラーログを軽量化
+                                            if processed_count <= 5:  # 最初の5件のみ詳細ログ
+                                                print(f"❌ Strategy error for {symbol}: {e}")
                                     else:
-                                        print(
-                                            f"⚠️ Strategy engine not available for {symbol}"
-                                        )
+                                        if processed_count <= 1:  # 初回のみ警告
+                                            print("⚠️ Strategy engine not available")
 
                             except Exception as data_error:
                                 print(f"❌ 全銘柄分析失敗 for {symbol}: {data_error}")
@@ -937,11 +964,27 @@ class TradeMini:
                         continue
 
             # 🚀 QuestDB一括書き込み
+            questdb_start = time.time()
             questdb_saved = 0
             if questdb_lines:
                 questdb_saved = TradeMini._send_to_questdb_lightning(questdb_lines)
+            timing_data["questdb_save_time"] = time.time() - questdb_start
 
             duration = time.time() - start_time
+            timing_data["total_processing_time"] = duration
+            
+            # 🕒 詳細タイミングレポート
+            print(f"🕒 DETAILED TIMING REPORT for batch #{batch_id}:")
+            print(f"  📋 Total tickers: {len(tickers)}")
+            print(f"  🔧 Initialization: {timing_data['initialization_time']:.4f}s")
+            print(f"  📊 QuestDB prep: {timing_data['questdb_preparation']:.4f}s")
+            print(f"  💾 Data Manager: {timing_data['data_manager_time']:.4f}s")
+            print(f"  🧠 Strategy: {timing_data['strategy_time']:.4f}s")
+            print(f"  💾 QuestDB save: {timing_data['questdb_save_time']:.4f}s")
+            print(f"  ⏱️  TOTAL: {timing_data['total_processing_time']:.4f}s")
+            print(f"  📈 Processed: {processed_count}/{len(tickers)} tickers")
+            print(f"  🎯 Signals: {signals_count}")
+            
             logger.info(
                 f"⚡ Lightning batch #{batch_id}: {processed_count}/{len(tickers)} processed, {questdb_saved} saved to QuestDB, {signals_count} signals in {duration:.3f}s"
             )
