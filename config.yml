@@ -83,7 +83,7 @@ mexc:
     # 本番環境
     production:
         # WebSocket URL
-        ws_url: "wss://wbs.mexc.com/ws"
+        ws_url: "wss://contract.mexc.com/edge"
         # REST API URL
         api_url: "https://api.mexc.com"
 
@@ -102,7 +102,7 @@ mexc:
     # 再接続設定
     reconnect_interval: 5
     max_reconnect_attempts: 10
-    ping_interval: 30
+    ping_interval: 20
 
 # QuestDB設定
 questdb:

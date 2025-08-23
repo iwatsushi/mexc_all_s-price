@@ -195,16 +195,15 @@ class MEXCWebSocketProcess:
         if not self._websocket:
             return
         
-        # 全ティッカー購読
+        # シンプルなティッカー購読（従来の方式）
         subscribe_msg = {
-            "method": "sub.tickers",
-            "param": {}
+            "method": "sub.tickers"
         }
         subscribe_json = json.dumps(subscribe_msg)
         
         try:
             await self._websocket.send(subscribe_json)
-            logger.info("📡 Subscribed to MEXC tickers channel")
+            logger.info(f"📡 Subscribed to MEXC tickers channel: {subscribe_json}")
         except Exception as e:
             logger.error(f"💥 Failed to subscribe: {e}")
             raise
@@ -234,13 +233,14 @@ class MEXCWebSocketProcess:
             except asyncio.TimeoutError:
                 # タイムアウト処理
                 since = time.monotonic() - last_recv
-                if since > 15:  # 15秒でスタール警告
+                
+                # Ping送信チェック（タイムアウト時も実行） - 先に実行
+                await self._check_ping(time.monotonic())
+                
+                if since > 30:  # 30秒でスタール警告（pingを考慮して延長）
                     logger.warning(f"⚠️ MEXC WebSocket STALL: {since:.1f}s since last message")
                     # 再接続をトリガー
                     raise websockets.exceptions.ConnectionClosed(None, None)
-                    
-                # Ping送信チェック（タイムアウト時も実行）
-                await self._check_ping(time.monotonic())
                 
             except websockets.exceptions.ConnectionClosed as e:
                 logger.warning(f"🔌 WebSocket connection closed during message loop: {e}")
@@ -317,6 +317,7 @@ class MEXCWebSocketProcess:
             return
         
         try:
+            # MEXCの標準Ping形式
             ping_msg = {"method": "ping"}
             ping_json = json.dumps(ping_msg)
             await self._websocket.send(ping_json)
