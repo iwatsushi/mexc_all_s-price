@@ -510,11 +510,11 @@ class TradingStrategy:
             import traceback
 
             logger.debug(f"Statistics error traceback: {traceback.format_exc()}")
-            
+
     def analyze_tick_optimized(self, tick: TickData) -> TradingSignal:
         """
         🚀 最適化されたティック分析 (全銘柄対応高速版)
-        
+
         主な最適化:
         - ロック時間の最小化
         - 不要な計算のスキップ
@@ -522,14 +522,14 @@ class TradingStrategy:
         """
         # 🚀 ロック外での事前チェック（ロック競合回避）
         has_position = tick.symbol in self.position_trackers
-        
+
         if has_position:
             # 既存ポジションがある場合の軽量処理
             return self._analyze_existing_position(tick)
         else:
             # 新規エントリー候補の超高速分析
             return self._analyze_new_entry_fast(tick)
-    
+
     def _analyze_existing_position(self, tick: TickData) -> TradingSignal:
         """既存ポジションの軽量分析"""
         with self._lock:
@@ -537,20 +537,20 @@ class TradingStrategy:
             if not tracker:
                 # ポジションが消失した場合
                 return self._create_no_signal(tick)
-                
+
             self._update_position_tracker(tick)
             return self._check_close_signal(tick.symbol, tick.price, tick.timestamp)
-    
+
     def _analyze_new_entry_fast(self, tick: TickData) -> TradingSignal:
         """新規エントリーの超高速分析 (キャッシュ最適化)"""
         # 価格変動率を高速取得（キャッシュ利用）
         change_percent = self.data_manager.get_price_change_percent(
             tick.symbol, self.price_comparison_seconds
         )
-        
+
         if change_percent is None:
             return self._create_no_signal(tick)
-        
+
         # 🚀 閾値チェックを最適化（早期リターン）
         if change_percent >= self.long_threshold:
             return self._create_signal(tick, SignalType.LONG, change_percent)
@@ -558,7 +558,7 @@ class TradingStrategy:
             return self._create_signal(tick, SignalType.SHORT, change_percent)
         else:
             return self._create_no_signal(tick)
-    
+
     def _create_no_signal(self, tick: TickData) -> TradingSignal:
         """NONEシグナルの高速生成"""
         return TradingSignal(
@@ -567,8 +567,10 @@ class TradingStrategy:
             price=tick.price,
             timestamp=tick.timestamp,
         )
-    
-    def _create_signal(self, tick: TickData, signal_type: SignalType, change_percent: float) -> TradingSignal:
+
+    def _create_signal(
+        self, tick: TickData, signal_type: SignalType, change_percent: float
+    ) -> TradingSignal:
         """取引シグナルの高速生成"""
         if signal_type == SignalType.LONG:
             reason = f"Price +{change_percent:.2f}%"
@@ -576,16 +578,19 @@ class TradingStrategy:
         else:
             reason = f"Price {change_percent:.2f}%"
             self.stats["short_signals"] += 1
-            
+
         self.stats["signals_generated"] += 1
-        
+
         return TradingSignal(
             symbol=tick.symbol,
             signal_type=signal_type,
             price=tick.price,
             timestamp=tick.timestamp,
             reason=reason,
-            confidence=min(abs(change_percent) / max(self.long_threshold, self.short_threshold), 2.0),
+            confidence=min(
+                abs(change_percent) / max(self.long_threshold, self.short_threshold),
+                2.0,
+            ),
         )
 
     def process_tick_and_execute_trades(self, tick: TickData) -> bool:
@@ -602,7 +607,7 @@ class TradingStrategy:
             # 🚀 高速化: 軽量チェック（全銘柄処理）
             if not self._should_process_tick(tick):
                 return False
-                
+
             # 🚀 高効率戦略分析（キャッシュ最適化済み）
             signal = self.analyze_tick_optimized(tick)
 
@@ -615,7 +620,7 @@ class TradingStrategy:
         except Exception as e:
             logger.error(f"Error processing tick for {tick.symbol}: {e}")
             return False
-            
+
     def _should_process_tick(self, tick: TickData) -> bool:
         """
         🚀 軽量事前チェック: 全銘柄処理のための効率化
