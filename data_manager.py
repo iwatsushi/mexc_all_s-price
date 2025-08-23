@@ -31,7 +31,7 @@ class SymbolTickData:
 
         # 最新データのキャッシュ
         self.latest_tick: Optional[TickData] = None
-        
+
         # 🚀 クリーンアップ頻度制御
         self.last_cleanup_time = 0
         self.cleanup_interval = 300  # 5分に1回のみ
@@ -50,11 +50,12 @@ class SymbolTickData:
     def add_tick(self, tick: TickData):
         """ティックデータを追加（詳細測定付き）"""
         import time as timing_module  # 内部測定用
+
         add_start = timing_module.time()
-        
+
         with self._lock:
             lock_acquired = timing_module.time()
-            
+
             # 重複データのチェック
             duplicate_check_start = timing_module.time()
             if tick.timestamp in self.timestamp_index:
@@ -97,17 +98,17 @@ class SymbolTickData:
                 self._cleanup_old_data()
                 self.last_cleanup_time = current_time
             cleanup_elapsed = timing_module.time() - cleanup_start
-            
+
         total_elapsed = timing_module.time() - add_start
         lock_wait_time = lock_acquired - add_start
-        
+
         # 🔍 異常に遅い処理の詳細分析（10ms以上）
         if total_elapsed > 0.01:
             print(f"🔍 add_tick BREAKDOWN for {self.symbol}:")
             print(f"  Total: {total_elapsed*1000:.2f}ms")
             print(f"  Lock wait: {lock_wait_time*1000:.2f}ms")
             print(f"  Duplicate check: {duplicate_check_elapsed*1000:.2f}ms")
-            print(f"  Data append: {append_elapsed*1000:.2f}ms") 
+            print(f"  Data append: {append_elapsed*1000:.2f}ms")
             print(f"  Stats update: {stats_elapsed*1000:.2f}ms")
             print(f"  Cleanup: {cleanup_elapsed*1000:.2f}ms")
             print(f"  Data count: {len(self.tick_data)}")
@@ -140,25 +141,27 @@ class SymbolTickData:
                 return None
 
             try:
-                target_time_ns = self.latest_tick.timestamp - (n_seconds * 1_000_000_000)
+                target_time_ns = self.latest_tick.timestamp - (
+                    n_seconds * 1_000_000_000
+                )
             except (TypeError, AttributeError):
                 return None
 
             # 🚀 逆順検索 + 早期終了で高速化
             closest_tick = None
             min_time_diff_ns = float("inf")
-            
+
             for tick in reversed(self.tick_data):
                 if not isinstance(tick.timestamp, int):
                     continue
 
                 time_diff_ns = abs(tick.timestamp - target_time_ns)
-                
+
                 # より良い候補が見つかったら更新
                 if time_diff_ns < min_time_diff_ns:
                     min_time_diff_ns = time_diff_ns
                     closest_tick = tick
-                    
+
                     # 🚀 十分に近い値が見つかったら早期終了
                     if time_diff_ns < 100_000_000:  # 0.1秒以内なら十分
                         break
@@ -312,21 +315,21 @@ class DataManager:
                         significant_changes[symbol] = change_percent
 
         return significant_changes
-    
+
     def get_all_price_changes_batch(self, n_seconds: int) -> Dict[str, float]:
         """
         🚀 全銘柄の価格変化率を一括計算（2秒周期最適化）
-        
+
         個別計算の代わりに一括処理でパフォーマンス向上
         """
         changes = {}
-        
+
         with self._lock:
             for symbol, symbol_data in self.symbol_data.items():
                 change_percent = symbol_data.get_price_change_percent(n_seconds)
                 if change_percent is not None:
                     changes[symbol] = change_percent
-        
+
         return changes
 
     def _periodic_cleanup(self):
