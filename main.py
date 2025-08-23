@@ -28,6 +28,7 @@ from bybit_client import BybitClient
 from config import Config
 from data_manager import DataManager
 from mexc_client import MEXCClient, TickData
+from mexc_websocket_process import mexc_websocket_worker
 from position_manager import PositionManager
 from questdb_client import QuestDBClient, QuestDBTradeRecordManager
 from strategy import SignalType, TradingStrategy
@@ -63,6 +64,12 @@ class TradeMini:
         # 実行制御
         self.running = False
         self.shutdown_event = threading.Event()
+        
+        # マルチプロセス管理
+        self.websocket_process = None
+        self.websocket_data_queue = None
+        self.websocket_control_queue = None
+        self.use_dedicated_websocket_process = False
 
         # 統計
         self.stats = {
@@ -150,14 +157,108 @@ class TradeMini:
 
         logging.getLogger().addHandler(InterceptHandler())
 
+    def _init_multiprocess_websocket(self):
+        """専用WebSocketプロセス初期化"""
+        try:
+            # プロセス間通信キュー作成
+            self.websocket_data_queue = multiprocessing.Queue(maxsize=1000)
+            self.websocket_control_queue = multiprocessing.Queue(maxsize=10)
+            
+            # WebSocketプロセス作成
+            self.websocket_process = multiprocessing.Process(
+                target=mexc_websocket_worker,
+                args=(
+                    self.config._config,  # 設定辞書を渡す
+                    self.websocket_data_queue,
+                    self.websocket_control_queue
+                ),
+                name="MEXCWebSocketProcess"
+            )
+            
+            logger.info("🚀 MEXC WebSocket Process initialized")
+            self.use_dedicated_websocket_process = True
+            
+        except Exception as e:
+            logger.error(f"💥 Failed to initialize WebSocket process: {e}")
+            raise
+
+    def _start_websocket_process(self):
+        """WebSocketプロセス開始"""
+        if self.websocket_process and not self.websocket_process.is_alive():
+            try:
+                self.websocket_process.start()
+                logger.info(f"✅ MEXC WebSocket Process started (PID: {self.websocket_process.pid})")
+            except Exception as e:
+                logger.error(f"💥 Failed to start WebSocket process: {e}")
+                raise
+
+    def _stop_websocket_process(self):
+        """WebSocketプロセス停止"""
+        if self.websocket_process and self.websocket_process.is_alive():
+            try:
+                # 停止シグナル送信
+                self.websocket_control_queue.put("shutdown")
+                
+                # プロセス終了を待つ（タイムアウト付き）
+                self.websocket_process.join(timeout=10)
+                
+                if self.websocket_process.is_alive():
+                    logger.warning("⚠️ WebSocket process did not shutdown gracefully, terminating...")
+                    self.websocket_process.terminate()
+                    self.websocket_process.join(timeout=5)
+                    
+                    if self.websocket_process.is_alive():
+                        logger.error("💥 Force killing WebSocket process...")
+                        self.websocket_process.kill()
+                        self.websocket_process.join()
+                
+                logger.info("✅ MEXC WebSocket Process stopped")
+                
+            except Exception as e:
+                logger.error(f"💥 Error stopping WebSocket process: {e}")
+
+    async def _process_websocket_data(self):
+        """WebSocketプロセスからのデータ処理"""
+        while self.running:
+            try:
+                # 非ブロッキングでデータ取得
+                if not self.websocket_data_queue.empty():
+                    data_packet = self.websocket_data_queue.get_nowait()
+                    
+                    packet_type = data_packet.get('type')
+                    if packet_type == 'tickers':
+                        # ティッカーデータを既存のコールバックに転送
+                        tickers = data_packet.get('data', [])
+                        if tickers:
+                            self._on_ticker_batch_received(tickers)
+                    elif packet_type == 'stats':
+                        # WebSocketプロセス統計情報を処理
+                        ws_stats = data_packet.get('data', {})
+                        logger.debug(f"📊 WebSocket Process Stats: {ws_stats}")
+                
+                await asyncio.sleep(0.01)  # CPU使用率制御
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Error processing WebSocket data: {e}")
+                await asyncio.sleep(0.1)
+
     async def initialize(self):
         """コンポーネント初期化"""
         logger.info("Initializing components...")
 
         try:
-            # MEXC クライアント（ティックデータ取得用）
-            self.mexc_client = MEXCClient(self.config)
-            logger.info("MEXC client created")
+            # WebSocket処理方式の判定
+            use_dedicated_process = self.config.get('bybit.environment') != 'websocket-ping_only'
+            
+            if use_dedicated_process:
+                # 専用WebSocketプロセス使用
+                logger.info("🚀 Using dedicated WebSocket process for MEXC connection")
+                self._init_multiprocess_websocket()
+            else:
+                # 従来のインラインWebSocket使用
+                logger.info("🔍 Using inline WebSocket for MEXC connection")
+                self.mexc_client = MEXCClient(self.config)
+                logger.info("MEXC client created")
 
             # Bybit クライアント（統計表示用にメインプロセスでも初期化）
             from bybit_client import BybitClient
@@ -201,15 +302,21 @@ class TradeMini:
             logger.info("Trading strategy created")
 
             # MEXC WebSocket 接続
-            if not await self.mexc_client.start():
-                raise Exception("Failed to connect to MEXC WebSocket")
+            if self.use_dedicated_websocket_process:
+                # 専用プロセスでWebSocket処理
+                self._start_websocket_process()
+                logger.info("✅ Dedicated WebSocket process started")
+            else:
+                # インラインでWebSocket処理
+                if not await self.mexc_client.start():
+                    raise Exception("Failed to connect to MEXC WebSocket")
 
-            # ティッカーバッチコールバック設定（パターンB'）
-            self.mexc_client.set_batch_callback(self._on_ticker_batch_received)
+                # ティッカーバッチコールバック設定（パターンB'）
+                self.mexc_client.set_batch_callback(self._on_ticker_batch_received)
 
-            # 全銘柄購読
-            if not await self.mexc_client.subscribe_all_tickers():
-                raise Exception("Failed to subscribe to all tickers")
+                # 全銘柄購読
+                if not await self.mexc_client.subscribe_all_tickers():
+                    raise Exception("Failed to subscribe to all tickers")
 
             # 統計表示タイマー開始
             logger.info("🔧 Starting statistics timer...")
@@ -1288,35 +1395,65 @@ class TradeMini:
             self.running = True
             logger.info("Trade Mini is running. Press Ctrl+C to stop.")
 
-            # メインループ
-            last_health_check = time.time()
-            while self.running and not self.shutdown_event.is_set():
-                try:
-                    await asyncio.sleep(1.0)
-
-                    # 🩺 プロセスヘルスチェック（30秒毎）- WebSocket監視モードでは無効
-                    if self.config.get('bybit.environment') != 'websocket-ping_only':
-                        current_time = time.time()
-                        if current_time - last_health_check >= 30.0:
-                            self._check_multiprocess_health()
-                            last_health_check = current_time
-
-                    # 定期的なクリーンアップ
-                    if int(time.time()) % 300 == 0 and self.position_manager:  # 5分毎
-                        self.position_manager.cleanup_closed_positions()
-
-                except KeyboardInterrupt:
-                    break
-                except Exception as e:
-                    logger.error(f"Error in main loop: {e}")
-                    await asyncio.sleep(1.0)
-
-            logger.info("Main loop ended")
+            # メインループタスク作成
+            main_tasks = []
+            
+            # WebSocketデータ処理タスク（専用プロセス使用時）
+            if self.use_dedicated_websocket_process:
+                websocket_data_task = asyncio.create_task(self._process_websocket_data())
+                main_tasks.append(websocket_data_task)
+                logger.info("🔄 WebSocket data processing task started")
+            
+            # メインループタスク
+            main_loop_task = asyncio.create_task(self._main_loop())
+            main_tasks.append(main_loop_task)
+            
+            try:
+                # 全タスクの完了を待つ
+                await asyncio.gather(*main_tasks, return_exceptions=True)
+            except Exception as e:
+                logger.error(f"💥 Main task error: {e}")
+            finally:
+                # 残りのタスクをキャンセル
+                for task in main_tasks:
+                    if not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
 
         except Exception as e:
             logger.error(f"Critical error: {e}")
         finally:
             await self.shutdown()
+
+    async def _main_loop(self):
+        """メインループ処理"""
+        last_health_check = time.time()
+        
+        while self.running and not self.shutdown_event.is_set():
+            try:
+                await asyncio.sleep(1.0)
+
+                # 🩺 プロセスヘルスチェック（30秒毎）- WebSocket監視モードでは無効
+                if self.config.get('bybit.environment') != 'websocket-ping_only':
+                    current_time = time.time()
+                    if current_time - last_health_check >= 30.0:
+                        self._check_multiprocess_health()
+                        last_health_check = current_time
+
+                # 定期的なクリーンアップ
+                if int(time.time()) % 300 == 0 and self.position_manager:  # 5分毎
+                    self.position_manager.cleanup_closed_positions()
+
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                logger.error(f"Error in main loop: {e}")
+                await asyncio.sleep(1.0)
+        
+        logger.info("Main loop ended")
 
     def _setup_signal_handlers(self):
         """シグナルハンドラー設定"""
@@ -1335,6 +1472,12 @@ class TradeMini:
 
         self.running = False
         self.shutdown_event.set()
+
+        # WebSocketプロセス停止
+        if self.use_dedicated_websocket_process:
+            logger.info("Stopping WebSocket process...")
+            self._stop_websocket_process()
+            logger.info("WebSocket process stopped")
 
         # マルチプロセスワーカー停止
         if hasattr(self, "processing_active"):
