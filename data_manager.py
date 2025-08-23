@@ -277,6 +277,22 @@ class DataManager:
                         significant_changes[symbol] = change_percent
 
         return significant_changes
+    
+    def get_all_price_changes_batch(self, n_seconds: int) -> Dict[str, float]:
+        """
+        🚀 全銘柄の価格変化率を一括計算（2秒周期最適化）
+        
+        個別計算の代わりに一括処理でパフォーマンス向上
+        """
+        changes = {}
+        
+        with self._lock:
+            for symbol, symbol_data in self.symbol_data.items():
+                change_percent = symbol_data.get_price_change_percent(n_seconds)
+                if change_percent is not None:
+                    changes[symbol] = change_percent
+        
+        return changes
 
     def _periodic_cleanup(self):
         """定期的なクリーンアップ処理"""

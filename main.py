@@ -798,83 +798,27 @@ class TradeMini:
                         # 🔄 全銘柄を戦略分析対象に変更（制限削除）
                         signal = None
 
-                        # 🚀 全銘柄処理: 効率化により全835銘柄を処理
-                        if processed_count <= 835:  # 全銘柄処理（効率化済み）
-                            try:
-                                print(
-                                    f"🔄 全銘柄分析: {symbol} (processed_count={processed_count})"
-                                )
+                        # 🚀 データ保存のみ: 戦略処理は後でバッチ実行
+                        try:
+                            # TickDataオブジェクトの作成（数値タイムスタンプで統一）
+                            tick_timestamp_ns = timestamp_ns  # 既に計算済みのナノ秒タイムスタンプを使用
 
-                                # TickDataオブジェクトの作成（数値タイムスタンプで統一）
-                                # QuestDBと同じtimestamp_nsを使用してdatetime型との混在を回避
-                                tick_timestamp_ns = timestamp_ns  # 既に計算済みのナノ秒タイムスタンプを使用
+                            tick = TickData(
+                                symbol=symbol,
+                                price=price_f,
+                                timestamp=tick_timestamp_ns,  # ナノ秒単位の数値タイムスタンプ
+                                volume=volume_f,
+                            )
 
-                                tick = TickData(
-                                    symbol=symbol,
-                                    price=price_f,
-                                    timestamp=tick_timestamp_ns,  # ナノ秒単位の数値タイムスタンプ
-                                    volume=volume_f,
-                                )
+                            # 🕒 データマネージャー処理時間測定
+                            dm_start = time.time()
+                            TradeMini._mp_data_manager.add_tick(tick)
+                            dm_elapsed = time.time() - dm_start
+                            timing_data["data_manager_time"] += dm_elapsed
 
-                                # 🕒 データマネージャー処理時間測定
-                                dm_start = time.time()
-                                TradeMini._mp_data_manager.add_tick(tick)
-                                dm_elapsed = time.time() - dm_start
-                                timing_data["data_manager_time"] += dm_elapsed
-
-                                print(
-                                    f"✅ Data added successfully in {dm_elapsed:.3f}s for {symbol}"
-                                )
-
-                                # データ件数とタイムレンジの確認
-                                symbol_data = (
-                                    TradeMini._mp_data_manager.get_symbol_data(symbol)
-                                )
-                                if symbol_data:
-                                    data_count = symbol_data.get_data_count()
-                                    time_range = symbol_data.get_time_range()
-                                    print(
-                                        f"📊 {symbol}: data_count={data_count}, time_range={time_range}"
-                                    )
-
-                                    # 🚀 高効率戦略エンジン処理（並列化対応）
-                                    if TradeMini._mp_strategy is not None:
-                                        try:
-                                            strategy_start = time.time()
-                                            
-                                            # ティックデータを軽量作成
-                                            tick_data = TickData(
-                                                symbol=symbol,
-                                                price=price_f,
-                                                timestamp=tick_timestamp_ns,
-                                                volume=0.0,
-                                            )
-
-                                            # 🚀 最適化された戦略処理
-                                            trade_executed = TradeMini._mp_strategy.process_tick_and_execute_trades(
-                                                tick_data
-                                            )
-                                            
-                                            strategy_elapsed = time.time() - strategy_start
-                                            timing_data["strategy_time"] += strategy_elapsed
-
-                                            if trade_executed:
-                                                print(f"🎯 Trade executed for {symbol}")
-                                                signals_count += 1
-
-                                        except Exception as e:
-                                            # エラーログを軽量化
-                                            if processed_count <= 5:  # 最初の5件のみ詳細ログ
-                                                print(f"❌ Strategy error for {symbol}: {e}")
-                                    else:
-                                        if processed_count <= 1:  # 初回のみ警告
-                                            print("⚠️ Strategy engine not available")
-
-                            except Exception as data_error:
-                                print(f"❌ 全銘柄分析失敗 for {symbol}: {data_error}")
-                                import traceback
-
-                                print(f"Error traceback: {traceback.format_exc()}")
+                        except Exception as data_error:
+                            if processed_count <= 5:  # 最初の5件のみ詳細ログ
+                                print(f"❌ データ保存失敗 for {symbol}: {data_error}")
 
                         # 🧪 強制テストシグナル（特定銘柄で確実にシグナル生成をテスト）
                         if symbol == "CSKY_USDT" and processed_count == 1:
@@ -969,6 +913,45 @@ class TradeMini:
             if questdb_lines:
                 questdb_saved = TradeMini._send_to_questdb_lightning(questdb_lines)
             timing_data["questdb_save_time"] = time.time() - questdb_start
+            
+            # 🚀 一括戦略分析（2秒周期最適化）
+            strategy_batch_start = time.time()
+            if TradeMini._mp_strategy is not None and TradeMini._mp_data_manager is not None:
+                try:
+                    # 全銘柄の価格変化率を一括取得
+                    all_changes = TradeMini._mp_data_manager.get_all_price_changes_batch(10)
+                    
+                    # 変化率基準で有望銘柄のみ戦略分析
+                    long_threshold = 0.001  # config.ymlから取得すべき
+                    short_threshold = 0.001
+                    
+                    for symbol, change_percent in all_changes.items():
+                        if abs(change_percent) >= min(long_threshold, short_threshold):
+                            # 有望銘柄のみ詳細戦略分析
+                            try:
+                                symbol_data = TradeMini._mp_data_manager.get_symbol_data(symbol)
+                                if symbol_data and symbol_data.latest_tick:
+                                    tick_data = TickData(
+                                        symbol=symbol,
+                                        price=symbol_data.latest_tick.price,
+                                        timestamp=symbol_data.latest_tick.timestamp,
+                                        volume=0.0,
+                                    )
+                                    
+                                    # 戦略処理実行
+                                    trade_executed = TradeMini._mp_strategy.process_tick_and_execute_trades(tick_data)
+                                    if trade_executed:
+                                        print(f"🎯 Batch trade executed for {symbol} ({change_percent:+.3f}%)")
+                                        signals_count += 1
+                                        
+                            except Exception as e:
+                                if processed_count <= 3:
+                                    print(f"❌ Batch strategy error for {symbol}: {e}")
+                    
+                except Exception as e:
+                    print(f"❌ Batch strategy analysis failed: {e}")
+                    
+            timing_data["strategy_time"] = time.time() - strategy_batch_start
 
             duration = time.time() - start_time
             timing_data["total_processing_time"] = duration
