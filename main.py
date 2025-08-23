@@ -233,6 +233,8 @@ class TradeMini:
     def _on_ticker_batch_received(self, tickers: list):
         """WebSocket受信コールバック（真のマルチプロセス分離）"""
         try:
+            # ping処理テストログは無効化
+            
             # 🚀 受信証明のみ（極限の軽量化 < 0.001ms）
             self.reception_stats["batches_received"] += 1
             current_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -241,6 +243,8 @@ class TradeMini:
             if self.config.get('bybit.environment') == 'websocket-ping_only':
                 self._handle_websocket_monitor_batch(tickers, current_time)
                 return
+
+            # 💓 ping送信はMEXCClient内で統一処理
 
             # 📨 受信証明ログのみ
             logger.info(
@@ -276,6 +280,7 @@ class TradeMini:
             self._monitor_min_interval = float('inf')
             self._monitor_max_interval = 0.0
             self._monitor_start_time = time.time()
+            # ping送信管理はMEXCClient内で統一処理
         
         current_timestamp = time.time()
         if self._last_monitor_time:
@@ -290,22 +295,19 @@ class TradeMini:
         
         self._last_monitor_time = current_timestamp
         
-        # 統計更新
+        # 統計更新（ping処理より前に実行）
+        self.reception_stats["batches_received"] += 1
         self.reception_stats["tickers_received"] += len(tickers)
         
-        # 詳細ログ（受信統計）
-        logger.info(
-            f"📊 [{current_time}] WebSocket Monitor: Batch #{self.reception_stats['batches_received']}: "
-            f"{len(tickers)} tickers (total: {self.reception_stats['tickers_received']})"
-        )
+        # 💓 ping送信はMEXCClient内で統一処理（監視モードでも共通）
         
-        # 10秒ごとに統計表示
-        if not hasattr(self, '_last_stats_time'):
-            self._last_stats_time = current_timestamp
-        
-        if current_timestamp - self._last_stats_time >= 10.0:
-            self._print_websocket_monitor_stats()
-            self._last_stats_time = current_timestamp
+        # 詳細ログ（受信統計） - 重複削除
+        # logger.info(
+        #     f"📊 [{current_time}] WebSocket Monitor: Batch #{self.reception_stats['batches_received']}: "
+        #     f"{len(tickers)} tickers (total: {self.reception_stats['tickers_received']})"
+        # )
+    
+    
 
     def _print_websocket_monitor_stats(self):
         """WebSocket監視モード統計表示"""
@@ -1292,11 +1294,12 @@ class TradeMini:
                 try:
                     await asyncio.sleep(1.0)
 
-                    # 🩺 プロセスヘルスチェック（30秒毎）
-                    current_time = time.time()
-                    if current_time - last_health_check >= 30.0:
-                        self._check_multiprocess_health()
-                        last_health_check = current_time
+                    # 🩺 プロセスヘルスチェック（30秒毎）- WebSocket監視モードでは無効
+                    if self.config.get('bybit.environment') != 'websocket-ping_only':
+                        current_time = time.time()
+                        if current_time - last_health_check >= 30.0:
+                            self._check_multiprocess_health()
+                            last_health_check = current_time
 
                     # 定期的なクリーンアップ
                     if int(time.time()) % 300 == 0 and self.position_manager:  # 5分毎
