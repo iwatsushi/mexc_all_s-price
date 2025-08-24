@@ -96,9 +96,7 @@ class QuestDBClient:
                 sock.close()
 
                 if result == 0:
-                    logger.info(
-                        f"QuestDB接続テスト成功 (試行{attempt + 1}回目)"
-                    )
+                    logger.info(f"QuestDB接続テスト成功 (試行{attempt + 1}回目)")
                     return True
                 else:
                     if attempt < max_retries - 1:

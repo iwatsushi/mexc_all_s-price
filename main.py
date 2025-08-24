@@ -532,9 +532,7 @@ class TradeMini:
 
             # ワーカープロセスの生存確認
             if self.data_processor and not self.data_processor.is_alive():
-                logger.error(
-                    "🚨 マルチプロセスデータワーカー停止！再起動試行中..."
-                )
+                logger.error("🚨 マルチプロセスデータワーカー停止！再起動試行中...")
                 self._restart_multiprocess_worker()
                 return
 
@@ -545,7 +543,9 @@ class TradeMini:
             if heartbeat_age > 30.0:  # 30秒以上ハートビートがない
                 logger.warning(f"⚠️ ワーカーハートビート停止: {heartbeat_age:.1f}秒前")
                 if heartbeat_age > 60.0:  # 1分以上なら強制再起動
-                    logger.error("🚨 ワーカーハートビートタイムアウト！ワーカー再起動中...")
+                    logger.error(
+                        "🚨 ワーカーハートビートタイムアウト！ワーカー再起動中..."
+                    )
                     self._restart_multiprocess_worker()
                     return
 
@@ -670,9 +670,7 @@ class TradeMini:
                 "✅ マルチプロセスコンポーネント初期化成功",
                 flush=True,
             )
-            logger.info(
-                "✅ マルチプロセスコンポーネント初期化成功"
-            )
+            logger.info("✅ マルチプロセスコンポーネント初期化成功")
 
         except Exception as e:
             print(f"❌ マルチプロセスコンポーネント初期化失敗: {e}", flush=True)
@@ -730,9 +728,7 @@ class TradeMini:
                 signals_count = strategy_stats.get("signals_count", 0)
                 trades_executed = strategy_stats.get("trades_executed", 0)
             else:
-                print(
-                    "⚠️ 戦略が利用できません。QuestDBデータのみ作成", flush=True
-                )
+                print("⚠️ 戦略が利用できません。QuestDBデータのみ作成", flush=True)
                 processed_count, signals_count, trades_executed = 0, 0, 0
 
             strategy_time = time.time() - strategy_start

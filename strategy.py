@@ -168,9 +168,7 @@ class TradingStrategy:
         # デバッグ用ログ（主要銘柄のみ）
         major_debug_symbols = ["BTCUSDT", "BTC_USDT", "ETHUSDT", "ETH_USDT"]
         if tick.symbol in major_debug_symbols:
-            logger.info(
-                f"{tick.symbol}: 変動率={change_percent}, 価格={tick.price}"
-            )
+            logger.info(f"{tick.symbol}: 変動率={change_percent}, 価格={tick.price}")
 
         # 価格変動率をキャッシュ（メイン処理から取得可能に）
         if change_percent is not None:
@@ -248,9 +246,7 @@ class TradingStrategy:
             ):
                 tracker.min_profit_threshold_reached = True
                 tracker.breakeven_stop_set = True
-                logger.info(
-                    f"{symbol}: 最小利益闾値達成。建値ストップ設定"
-                )
+                logger.info(f"{symbol}: 最小利益闾値達成。建値ストップ設定")
 
         # 反発による決済判定
         reversal_signal = self._check_reversal_exit(tracker, current_price)
@@ -492,7 +488,9 @@ class TradingStrategy:
             logger.info(f"🚀 実行取引数: {main_stats.get('trades_executed', 0)}")
 
             logger.info(f"💎 アクティブ銘柄数: {data_stats.get('active_symbols', 0)}")
-            logger.info(f"🔥 オープンポジション: {position_stats.get('current_positions', 0)}")
+            logger.info(
+                f"🔥 オープンポジション: {position_stats.get('current_positions', 0)}"
+            )
             logger.info(
                 f"🏦 アカウント残高: {portfolio.get('account_balance', 0):.2f} USDT"
             )
@@ -500,7 +498,9 @@ class TradingStrategy:
                 f"📈 未実現損益: {portfolio.get('total_unrealized_pnl', 0):.2f} USDT"
             )
 
-            logger.info(f"💾 QuestDB保存ティック数: {questdb_stats.get('ticks_saved', 0):,}")
+            logger.info(
+                f"💾 QuestDB保存ティック数: {questdb_stats.get('ticks_saved', 0):,}"
+            )
             logger.info(
                 f"🔄 Bybit取引可能銘柄数: {symbol_stats.get('total_tradeable_symbols', 0)}"
             )
@@ -656,9 +656,7 @@ class TradingStrategy:
     def _execute_long_position(self, signal: TradingSignal) -> bool:
         """ロングポジションを開く"""
         try:
-            logger.info(
-                f"🔥 ロング闾値達成: {signal.symbol} 変動={signal.reason}"
-            )
+            logger.info(f"🔥 ロング闾値達成: {signal.symbol} 変動={signal.reason}")
 
             if self.position_manager is None:
                 logger.warning(
@@ -695,9 +693,7 @@ class TradingStrategy:
     def _execute_short_position(self, signal: TradingSignal) -> bool:
         """ショートポジションを開く"""
         try:
-            logger.info(
-                f"🔥 ショート闾値達成: {signal.symbol} 変動={signal.reason}"
-            )
+            logger.info(f"🔥 ショート闾値達成: {signal.symbol} 変動={signal.reason}")
 
             if self.position_manager is None:
                 logger.warning(

@@ -152,9 +152,7 @@ class PositionManager:
                         f"🏦 Bybitアカウント残高更新: {self.account_balance} USDT"
                     )
                 else:
-                    logger.error(
-                        f"Bybit残高取得失敗: {balance_response.get('retMsg')}"
-                    )
+                    logger.error(f"Bybit残高取得失敗: {balance_response.get('retMsg')}")
 
             else:  # MEXC
                 balance_response = self.mexc_client.get_balance()
@@ -178,9 +176,7 @@ class PositionManager:
                         f"🏦 MEXCアカウント残高更新: {self.account_balance} USDT"
                     )
                 else:
-                    logger.error(
-                        f"MEXC残高取得失敗: {balance_response.get('message')}"
-                    )
+                    logger.error(f"MEXC残高取得失敗: {balance_response.get('message')}")
 
         except Exception as e:
             logger.error(f"アカウント情報更新エラー: {e}")

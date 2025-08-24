@@ -183,9 +183,7 @@ class MEXCWebSocketProcess:
 
                 # Ping初期化
                 self._last_ping_time = time.monotonic()
-                logger.info(
-                    f"💓 MEXC ping初期化完了 ({self._ping_interval}秒間隔)"
-                )
+                logger.info(f"💓 MEXC ping初期化完了 ({self._ping_interval}秒間隔)")
 
                 # メッセージ受信ループ
                 await self._message_loop(websocket)
