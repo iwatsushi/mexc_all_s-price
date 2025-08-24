@@ -121,13 +121,13 @@ class SymbolMapper:
                 return True
 
             try:
-                logger.info("Updating symbol mapping from Bybit...")
+                logger.info("🔄 Bybitから銘柄マッピングを更新中...")
 
                 # Bybitから取引可能銘柄一覧を取得
                 available_symbols = self.bybit_client.get_available_symbols()
 
                 if not available_symbols:
-                    logger.warning("No symbols received from Bybit")
+                    logger.warning("⚠️ Bybitから銘柄が取得できません")
                     return False
 
                 # マッピング更新
@@ -144,7 +144,7 @@ class SymbolMapper:
                 self._last_update = current_time
 
                 logger.info(
-                    f"Symbol mapping updated: {len(self.tradeable_mexc_symbols)} tradeable symbols"
+                    f"銘柄マッピング更新完了: {len(self.tradeable_mexc_symbols)}個の取引可能銘柄"
                 )
                 logger.debug(
                     f"Sample symbols: {list(self.tradeable_mexc_symbols)[:10]}"
@@ -153,7 +153,7 @@ class SymbolMapper:
                 return True
 
             except Exception as e:
-                logger.error(f"Error updating symbol mapping: {e}")
+                logger.error(f"銘柄マッピング更新エラー: {e}")
                 return False
 
     def _convert_mexc_to_bybit(self, mexc_symbol: str) -> str:

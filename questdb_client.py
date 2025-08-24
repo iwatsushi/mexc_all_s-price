@@ -81,7 +81,7 @@ class QuestDBClient:
         # ワーカー開始
         self._start_workers()
 
-        logger.info(f"QuestDB client initialized: {self.host}:{self.ilp_port}")
+        logger.info(f"💾 QuestDBクライアント初期化完了: {self.host}:{self.ilp_port}")
 
     def _test_connection(self) -> bool:
         """QuestDB接続テスト（リトライ機能付き）"""
@@ -97,18 +97,18 @@ class QuestDBClient:
 
                 if result == 0:
                     logger.info(
-                        f"QuestDB connection test successful (attempt {attempt + 1})"
+                        f"QuestDB接続テスト成功 (試行{attempt + 1}回目)"
                     )
                     return True
                 else:
                     if attempt < max_retries - 1:
                         logger.debug(
-                            f"QuestDB connection attempt {attempt + 1} failed: {result}, retrying in {retry_delay}s..."
+                            f"QuestDB接続試行{attempt + 1}回目失敗: {result}, {retry_delay}秒後に再試行..."
                         )
                         time.sleep(retry_delay)
                     else:
                         logger.warning(
-                            f"QuestDB connection test failed after {max_retries} attempts: {result}"
+                            f"QuestDB接続テスト失敗 ({max_retries}回試行後): {result}"
                         )
                         return False
 
@@ -120,7 +120,7 @@ class QuestDBClient:
                     time.sleep(retry_delay)
                 else:
                     logger.warning(
-                        f"QuestDB connection test error after {max_retries} attempts: {e}"
+                        f"QuestDB接続テストエラー ({max_retries}回試行後): {e}"
                     )
                     return False
 
@@ -138,7 +138,7 @@ class QuestDBClient:
         )
         self.trade_worker_thread.start()
 
-        logger.info("QuestDB worker threads started")
+        logger.info("🚀 QuestDBワーカースレッド開始")
 
     def _send_ilp_data(self, data: str) -> bool:
         """ILPデータをQuestDBに送信（リトライ機能付き）"""
@@ -180,7 +180,7 @@ class QuestDBClient:
 
     def _tick_worker(self):
         """ティックデータワーカー"""
-        logger.info("Tick data worker started")
+        logger.info("📊 ティックデータワーカー開始")
 
         batch = []
         last_flush = time.time()
@@ -211,18 +211,18 @@ class QuestDBClient:
                     last_flush = current_time
 
             except Exception as e:
-                logger.error(f"Error in tick worker: {e}")
+                logger.error(f"ティックワーカーエラー: {e}")
                 time.sleep(1.0)
 
         # 終了時の残りデータ処理
         if batch:
             self._flush_tick_batch(batch)
 
-        logger.info("Tick data worker stopped")
+        logger.info("🛑 ティックデータワーカー停止")
 
     def _trade_worker(self):
         """取引記録ワーカー"""
-        logger.info("Trade record worker started")
+        logger.info("📈 取引記録ワーカー開始")
 
         batch = []
         last_flush = time.time()
@@ -252,14 +252,14 @@ class QuestDBClient:
                     last_flush = current_time
 
             except Exception as e:
-                logger.error(f"Error in trade worker: {e}")
+                logger.error(f"取引ワーカーエラー: {e}")
                 time.sleep(1.0)
 
         # 終了時の残りデータ処理
         if batch:
             self._flush_trade_batch(batch)
 
-        logger.info("Trade record worker stopped")
+        logger.info("🛑 取引記録ワーカー停止")
 
     def _flush_tick_batch(self, batch: List[TickData]) -> bool:
         """ティックデータバッチを送信"""

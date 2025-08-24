@@ -67,7 +67,7 @@ class MEXCWebSocketProcess:
 
     def run(self):
         """プロセスメインループ"""
-        logger.info("🚀 MEXC WebSocket Process starting...")
+        logger.info("🚀 MEXC WebSocketプロセス開始...")
 
         # シグナルハンドラー設定
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -93,7 +93,7 @@ class MEXCWebSocketProcess:
         self.stats["start_time"] = time.time()
         self._running = True
 
-        logger.info("💓 MEXC WebSocket Process initialized")
+        logger.info("💓 MEXC WebSocketプロセス初期化完了")
 
         # WebSocket接続とコントロール監視を並行実行
         tasks = []
@@ -169,14 +169,14 @@ class MEXCWebSocketProcess:
     async def _connect_and_run(self):
         """WebSocket接続と受信処理"""
         ws_url = self.config.mexc_ws_url
-        logger.info(f"🔗 Connecting to MEXC WebSocket: {ws_url}")
+        logger.info(f"🔗 MEXC WebSocketに接続中: {ws_url}")
 
         try:
             async with websockets.connect(ws_url) as websocket:
                 self._websocket = websocket
                 self._reconnect_attempts = 0
 
-                logger.info("✅ MEXC WebSocket connected successfully")
+                logger.info("✅ MEXC WebSocket接続成功")
 
                 # チャンネル購読
                 await self._subscribe_channels()
@@ -184,7 +184,7 @@ class MEXCWebSocketProcess:
                 # Ping初期化
                 self._last_ping_time = time.monotonic()
                 logger.info(
-                    f"💓 MEXC ping initialized ({self._ping_interval}s interval)"
+                    f"💓 MEXC ping初期化完了 ({self._ping_interval}秒間隔)"
                 )
 
                 # メッセージ受信ループ
@@ -210,7 +210,7 @@ class MEXCWebSocketProcess:
 
         try:
             await self._websocket.send(subscribe_json)
-            logger.info(f"📡 Subscribed to MEXC tickers channel: {subscribe_json}")
+            logger.info(f"📡 MEXCティッカーチャンネル購読: {subscribe_json}")
         except Exception as e:
             logger.error(f"💥 Failed to subscribe: {e}")
             raise
@@ -220,7 +220,7 @@ class MEXCWebSocketProcess:
         message_count = 0
         last_recv = time.monotonic()
 
-        logger.info("🔄 Starting WebSocket message receive loop...")
+        logger.info("🔄 WebSocketメッセージ受信ループ開始...")
 
         while self._running and not self._shutdown_event.is_set():
             try:
@@ -278,7 +278,7 @@ class MEXCWebSocketProcess:
             elif channel == "push.tickers":
                 await self._handle_tickers(data)
             elif channel == "rs.sub.tickers":
-                logger.info(f"✅ Subscription confirmed: {data.get('data')}")
+                logger.info(f"✅ 購読確認: {data.get('data')}")
             else:
                 logger.debug(f"🔍 Unhandled channel: {channel}")
 
@@ -296,7 +296,7 @@ class MEXCWebSocketProcess:
 
         self._last_pong_timestamp = pong_data
         self.stats["pongs_received"] += 1
-        logger.info(f"💓 Received pong from server: {pong_data}")
+        logger.info(f"💓 サーバーからpong受信: {pong_data}")
 
     async def _handle_tickers(self, data):
         """ティッカーデータ処理"""

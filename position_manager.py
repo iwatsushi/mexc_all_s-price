@@ -113,10 +113,10 @@ class PositionManager:
         # 初期化
         self._update_account_info()
 
-        logger.info(f"PositionManager initialized:")
-        logger.info(f"  - Max concurrent positions: {self.max_concurrent_positions}")
-        logger.info(f"  - Capital usage: {self.capital_usage_percent}%")
-        logger.info(f"  - Cross margin threshold: {self.cross_margin_threshold} USDT")
+        logger.info(f"💼 ポジションマネージャ初期化完了:")
+        logger.info(f"  - 最大同時ポジション数: {self.max_concurrent_positions}")
+        logger.info(f"  - 資本使用率: {self.capital_usage_percent}%")
+        logger.info(f"  - クロスマージン闾値: {self.cross_margin_threshold} USDT")
 
     def _update_account_info(self):
         """アカウント情報を更新"""
@@ -149,11 +149,11 @@ class PositionManager:
                             break
 
                     logger.info(
-                        f"Bybit account balance updated: {self.account_balance} USDT"
+                        f"🏦 Bybitアカウント残高更新: {self.account_balance} USDT"
                     )
                 else:
                     logger.error(
-                        f"Failed to get Bybit balance: {balance_response.get('retMsg')}"
+                        f"Bybit残高取得失敗: {balance_response.get('retMsg')}"
                     )
 
             else:  # MEXC
@@ -175,15 +175,15 @@ class PositionManager:
                             break
 
                     logger.info(
-                        f"MEXC account balance updated: {self.account_balance} USDT"
+                        f"🏦 MEXCアカウント残高更新: {self.account_balance} USDT"
                     )
                 else:
                     logger.error(
-                        f"Failed to get MEXC balance: {balance_response.get('message')}"
+                        f"MEXC残高取得失敗: {balance_response.get('message')}"
                     )
 
         except Exception as e:
-            logger.error(f"Error updating account info: {e}")
+            logger.error(f"アカウント情報更新エラー: {e}")
 
     def _determine_margin_mode(self) -> MarginMode:
         """マージンモードを決定"""

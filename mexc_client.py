@@ -90,21 +90,21 @@ class MEXCWebSocketClient:
     async def connect(self) -> bool:
         """WebSocket接続開始"""
         try:
-            logger.info(f"Starting MEXC WebSocket connection: {self.ws_url}")
+            logger.info(f"🔗 MEXC WebSocket接続開始: {self.ws_url}")
 
             self.running = True
             # WebSocketタスクを開始
             self._ws_task = asyncio.create_task(self._websocket_loop())
-            logger.info("🔄 WebSocket task started")
+            logger.info("🔄 WebSocketタスク開始")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to start MEXC WebSocket: {e}")
+            logger.error(f"MEXC WebSocket開始失敗: {e}")
             return False
 
     async def disconnect(self):
         """WebSocket接続停止"""
-        logger.info("Stopping MEXC WebSocket...")
+        logger.info("🛑 MEXC WebSocket停止中...")
 
         self.running = False
         self.shutdown_event.set()
@@ -369,7 +369,7 @@ class MEXCWebSocketClient:
                     return
 
                 self._last_pong_timestamp = pong_data
-                logger.info(f"💓 Received pong from server: {pong_data}")
+                logger.info(f"💓 サーバーからpong受信: {pong_data}")
                 return
             else:
                 channel = data.get("channel", "unknown")

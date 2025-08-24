@@ -380,7 +380,7 @@ class DataManager:
 
     def shutdown(self):
         """データマネージャーをシャットダウン"""
-        logger.info("Shutting down DataManager")
+        logger.info("🛑 データマネージャシャットダウン")
 
         if self._cleanup_timer:
             self._cleanup_timer.cancel()
@@ -389,4 +389,4 @@ class DataManager:
             self.symbol_data.clear()
             self.stats["active_symbols"] = 0
 
-        logger.info("DataManager shutdown completed")
+        logger.info("✅ データマネージャシャットダウン完了")

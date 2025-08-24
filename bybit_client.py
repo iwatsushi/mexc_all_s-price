@@ -71,7 +71,7 @@ class BybitClient:
         else:
             self.base_url = "https://api.bybit.com"  # 本番用URL
 
-        logger.info(f"Bybit API URL: {self.base_url} (environment: {environment})")
+        logger.info(f"🔗 Bybit API URL: {self.base_url} (環境: {environment})")
 
         self.session = requests.Session()
 
@@ -83,11 +83,11 @@ class BybitClient:
         try:
             response = self._send_request("GET", "/v5/market/time")
             if response.get("retCode") == 0:
-                logger.info("Bybit connection test successful")
+                logger.info("✅ Bybit接続テスト成功")
             else:
-                logger.warning(f"Bybit connection test failed: {response}")
+                logger.warning(f"⚠️ Bybit接続テスト失敗: {response}")
         except Exception as e:
-            logger.error(f"Bybit connection test error: {e}")
+            logger.error(f"❌ Bybit接続テストエラー: {e}")
 
     def _generate_signature(self, timestamp: str, params: str) -> str:
         """署名を生成"""
@@ -150,9 +150,9 @@ class BybitClient:
             return response.json()
 
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error sending request to {url}: {e}")
+            logger.error(f"{url}へのリクエストエラー: {e}")
             if hasattr(e, "response") and e.response:
-                logger.error(f"Response content: {e.response.text}")
+                logger.error(f"レスポンス内容: {e.response.text}")
             return {"retCode": -1, "retMsg": str(e)}
 
     def get_wallet_balance(self) -> Dict[str, Any]:
@@ -203,7 +203,7 @@ class BybitClient:
 
             return False
         except Exception as e:
-            logger.error(f"Error checking symbol availability for {mexc_symbol}: {e}")
+            logger.error(f"{mexc_symbol}の銘柄利用可能性チェックエラー: {e}")
             return False
 
     def place_market_order(
@@ -337,11 +337,11 @@ class BybitClient:
         response = self._send_request("POST", "/v5/position/set-leverage", params)
 
         if response.get("retCode") == 0:
-            logger.info(f"Set leverage for {mexc_symbol} to {leverage}x")
+            logger.info(f"{mexc_symbol}のレバレッジを{leverage}倍に設定")
             return True
         else:
             logger.error(
-                f"Failed to set leverage for {mexc_symbol}: {response.get('retMsg')}"
+                f"{mexc_symbol}のレバレッジ設定失敗: {response.get('retMsg')}"
             )
             return False
 
@@ -379,9 +379,9 @@ class BybitClient:
                     mexc_symbol = self._convert_bybit_to_mexc_symbol(symbol)
                     mexc_symbols.append(mexc_symbol)
 
-            logger.info(f"Found {len(mexc_symbols)} tradeable USDT pairs on Bybit")
+            logger.info(f"Bybitで{len(mexc_symbols)}個の取引可能USDTペアを発見")
             return sorted(mexc_symbols)
 
         except Exception as e:
-            logger.error(f"Error getting available symbols: {e}")
+            logger.error(f"利用可能銘柄取得エラー: {e}")
             return []

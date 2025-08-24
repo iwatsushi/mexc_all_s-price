@@ -117,12 +117,12 @@ class TradingStrategy:
         # スレッドセーフティ
         self._lock = threading.Lock()
 
-        logger.info(f"Trading strategy initialized with parameters:")
-        logger.info(f"  - Price comparison: {self.price_comparison_seconds}s")
-        logger.info(f"  - Long threshold: {self.long_threshold}%")
-        logger.info(f"  - Short threshold: {self.short_threshold}%")
-        logger.info(f"  - Reversal threshold: {self.reversal_threshold}%")
-        logger.info(f"  - Min profit threshold: {self.min_profit_percent}%")
+        logger.info(f"💹 トレーディング戦略初期化完了:")
+        logger.info(f"  - 価格比較期間: {self.price_comparison_seconds}秒")
+        logger.info(f"  - ロング闾値: {self.long_threshold}%")
+        logger.info(f"  - ショート闾値: {self.short_threshold}%")
+        logger.info(f"  - 反発闾値: {self.reversal_threshold}%")
+        logger.info(f"  - 最小利益闾値: {self.min_profit_percent}%")
 
     def analyze_tick(self, tick: TickData) -> TradingSignal:
         """
@@ -169,7 +169,7 @@ class TradingStrategy:
         major_debug_symbols = ["BTCUSDT", "BTC_USDT", "ETHUSDT", "ETH_USDT"]
         if tick.symbol in major_debug_symbols:
             logger.info(
-                f"{tick.symbol}: change_percent={change_percent}, price={tick.price}"
+                f"{tick.symbol}: 変動率={change_percent}, 価格={tick.price}"
             )
 
         # 価格変動率をキャッシュ（メイン処理から取得可能に）
@@ -249,7 +249,7 @@ class TradingStrategy:
                 tracker.min_profit_threshold_reached = True
                 tracker.breakeven_stop_set = True
                 logger.info(
-                    f"{symbol}: Min profit threshold reached. Breakeven stop set."
+                    f"{symbol}: 最小利益闾値達成。建値ストップ設定"
                 )
 
         # 反発による決済判定
@@ -354,7 +354,7 @@ class TradingStrategy:
             self.stats["active_positions"] = len(self.position_trackers)
             self.stats["total_positions_tracked"] += 1
 
-            logger.info(f"Position tracking started: {symbol} {side} @ {entry_price}")
+            logger.info(f"ポジション追跡開始: {symbol} {side} @ {entry_price}")
 
     def remove_position(self, symbol: str) -> Optional[PositionTracker]:
         """
@@ -370,7 +370,7 @@ class TradingStrategy:
             tracker = self.position_trackers.pop(symbol, None)
             if tracker:
                 self.stats["active_positions"] = len(self.position_trackers)
-                logger.info(f"Position tracking ended: {symbol}")
+                logger.info(f"ポジション追跡終了: {symbol}")
             return tracker
 
     def get_position_tracker(self, symbol: str) -> Optional[PositionTracker]:
@@ -483,34 +483,34 @@ class TradingStrategy:
                 logger.debug(f"Failed to get portfolio summary: {e}")
                 portfolio = {}
 
-            logger.info("=== TRADE MINI STATISTICS ===")
-            logger.info(f"Uptime: {uptime/3600:.2f} hours")
-            logger.info(f"Ticks processed: {main_stats.get('ticks_processed', 0)}")
+            logger.info("\n=== TRADE MINI 統計情報 ===")
+            logger.info(f"⏰ 稼働時間: {uptime/3600:.2f}時間")
+            logger.info(f"📊 ティック処理数: {main_stats.get('ticks_processed', 0):,}")
             logger.info(
-                f"Signals generated: {strategy_stats.get('signals_generated', 0)}"
+                f"📡 シグナル生成数: {strategy_stats.get('signals_generated', 0)}"
             )
-            logger.info(f"Trades executed: {main_stats.get('trades_executed', 0)}")
+            logger.info(f"🚀 実行取引数: {main_stats.get('trades_executed', 0)}")
 
-            logger.info(f"Active symbols: {data_stats.get('active_symbols', 0)}")
-            logger.info(f"Open positions: {position_stats.get('current_positions', 0)}")
+            logger.info(f"💎 アクティブ銘柄数: {data_stats.get('active_symbols', 0)}")
+            logger.info(f"🔥 オープンポジション: {position_stats.get('current_positions', 0)}")
             logger.info(
-                f"Account balance: {portfolio.get('account_balance', 0):.2f} USDT"
+                f"🏦 アカウント残高: {portfolio.get('account_balance', 0):.2f} USDT"
             )
             logger.info(
-                f"Total unrealized PnL: {portfolio.get('total_unrealized_pnl', 0):.2f} USDT"
+                f"📈 未実現損益: {portfolio.get('total_unrealized_pnl', 0):.2f} USDT"
             )
 
-            logger.info(f"QuestDB ticks saved: {questdb_stats.get('ticks_saved', 0)}")
+            logger.info(f"💾 QuestDB保存ティック数: {questdb_stats.get('ticks_saved', 0):,}")
             logger.info(
-                f"Tradeable symbols on Bybit: {symbol_stats.get('total_tradeable_symbols', 0)}"
+                f"🔄 Bybit取引可能銘柄数: {symbol_stats.get('total_tradeable_symbols', 0)}"
             )
-            logger.info("=============================")
+            logger.info("=============================\n")
 
         except Exception as e:
-            logger.error(f"Error logging comprehensive statistics: {e}")
+            logger.error(f"統計情報ログ出力エラー: {e}")
             import traceback
 
-            logger.debug(f"Statistics error traceback: {traceback.format_exc()}")
+            logger.debug(f"統計情報エラートレース: {traceback.format_exc()}")
 
     def analyze_tick_optimized(self, tick: TickData) -> TradingSignal:
         """
@@ -619,7 +619,7 @@ class TradingStrategy:
             return self._execute_trade_from_signal(signal)
 
         except Exception as e:
-            logger.error(f"Error processing tick for {tick.symbol}: {e}")
+            logger.error(f"{tick.symbol}のティック処理エラー: {e}")
             return False
 
     def _should_process_tick(self, tick: TickData) -> bool:
@@ -650,19 +650,19 @@ class TradingStrategy:
                 return False
 
         except Exception as e:
-            logger.error(f"Error executing trade from signal for {signal.symbol}: {e}")
+            logger.error(f"{signal.symbol}のシグナルからの取引実行エラー: {e}")
             return False
 
     def _execute_long_position(self, signal: TradingSignal) -> bool:
         """ロングポジションを開く"""
         try:
             logger.info(
-                f"🔥 LONG THRESHOLD REACHED: {signal.symbol} change={signal.reason}"
+                f"🔥 ロング闾値達成: {signal.symbol} 変動={signal.reason}"
             )
 
             if self.position_manager is None:
                 logger.warning(
-                    f"⚠️ POSITION MANAGER DISABLED: {signal.symbol} LONG signal ignored"
+                    f"⚠️ ポジションマネージャ無効: {signal.symbol} LONGシグナルを無視"
                 )
                 return False
 
@@ -679,29 +679,29 @@ class TradingStrategy:
 
             if success:
                 logger.info(
-                    f"✅ LONG POSITION OPENED: {signal.symbol} @ {signal.price}"
+                    f"✅ ロングポジションオープン: {signal.symbol} @ {signal.price}"
                 )
                 # 戦略側でもポジション追跡開始
                 self.add_position(signal.symbol, "LONG", signal.price, 1.0, entry_time)
                 return True
             else:
-                logger.error(f"❌ LONG POSITION FAILED: {signal.symbol} - {message}")
+                logger.error(f"❌ ロングポジション失敗: {signal.symbol} - {message}")
                 return False
 
         except Exception as e:
-            logger.error(f"❌ LONG POSITION ERROR: {signal.symbol} - {e}")
+            logger.error(f"❌ ロングポジションエラー: {signal.symbol} - {e}")
             return False
 
     def _execute_short_position(self, signal: TradingSignal) -> bool:
         """ショートポジションを開く"""
         try:
             logger.info(
-                f"🔥 SHORT THRESHOLD REACHED: {signal.symbol} change={signal.reason}"
+                f"🔥 ショート闾値達成: {signal.symbol} 変動={signal.reason}"
             )
 
             if self.position_manager is None:
                 logger.warning(
-                    f"⚠️ POSITION MANAGER DISABLED: {signal.symbol} SHORT signal ignored"
+                    f"⚠️ ポジションマネージャ無効: {signal.symbol} SHORTシグナルを無視"
                 )
                 return False
 
@@ -718,27 +718,27 @@ class TradingStrategy:
 
             if success:
                 logger.info(
-                    f"✅ SHORT POSITION OPENED: {signal.symbol} @ {signal.price}"
+                    f"✅ ショートポジションオープン: {signal.symbol} @ {signal.price}"
                 )
                 # 戦略側でもポジション追跡開始
                 self.add_position(signal.symbol, "SHORT", signal.price, 1.0, entry_time)
                 return True
             else:
-                logger.error(f"❌ SHORT POSITION FAILED: {signal.symbol} - {message}")
+                logger.error(f"❌ ショートポジション失敗: {signal.symbol} - {message}")
                 return False
 
         except Exception as e:
-            logger.error(f"❌ SHORT POSITION ERROR: {signal.symbol} - {e}")
+            logger.error(f"❌ ショートポジションエラー: {signal.symbol} - {e}")
             return False
 
     def _execute_close_position(self, signal: TradingSignal) -> bool:
         """ポジションを決済"""
         try:
-            logger.info(f"🔥 CLOSE SIGNAL: {signal.symbol} reason={signal.reason}")
+            logger.info(f"🔥 クローズシグナル: {signal.symbol} 理由={signal.reason}")
 
             if self.position_manager is None:
                 logger.warning(
-                    f"⚠️ POSITION MANAGER DISABLED: {signal.symbol} CLOSE signal ignored"
+                    f"⚠️ ポジションマネージャ無効: {signal.symbol} CLOSEシグナルを無視"
                 )
                 return False
 
@@ -747,16 +747,16 @@ class TradingStrategy:
             )
 
             if success:
-                logger.info(f"✅ POSITION CLOSED: {signal.symbol} @ {signal.price}")
+                logger.info(f"✅ ポジションクローズ: {signal.symbol} @ {signal.price}")
                 # 戦略側でもポジション追跡終了
                 self.remove_position(signal.symbol)
                 return True
             else:
-                logger.error(f"❌ CLOSE POSITION FAILED: {signal.symbol} - {message}")
+                logger.error(f"❌ ポジションクローズ失敗: {signal.symbol} - {message}")
                 return False
 
         except Exception as e:
-            logger.error(f"❌ CLOSE POSITION ERROR: {signal.symbol} - {e}")
+            logger.error(f"❌ ポジションクローズエラー: {signal.symbol} - {e}")
             return False
 
     def process_ticker_batch(
@@ -779,7 +779,7 @@ class TradingStrategy:
         Returns:
             処理統計 {"processed_count": int, "signals_count": int, "trades_executed": int}
         """
-        logger.info(f"🚀 Strategy processing batch #{batch_id}: {len(tickers)} tickers")
+        logger.info(f"🚀 戦略バッチ#{batch_id}処理開始: {len(tickers)}ティッカー")
 
         start_time = time.time()
         processed_count = 0
@@ -851,14 +851,14 @@ class TradingStrategy:
                         pass
 
             except (ValueError, TypeError) as e:
-                logger.warning(f"Error processing ticker {symbol}: {e}")
+                logger.warning(f"{symbol}ティッカー処理エラー: {e}")
                 continue
 
         duration = time.time() - start_time
 
         logger.info(
-            f"✅ Strategy batch #{batch_id} completed: {processed_count}/{len(tickers)} processed, "
-            f"{signals_count} signals, {trades_executed} trades in {duration:.3f}s"
+            f"✅ 戦略バッチ#{batch_id}処理完了: {processed_count}/{len(tickers)}処理済み, "
+            f"{signals_count}シグナル, {trades_executed}取引実行 ({duration:.3f}秒)"
         )
 
         return {

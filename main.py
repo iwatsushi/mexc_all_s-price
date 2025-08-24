@@ -107,7 +107,7 @@ class TradeMini:
         self.reception_stats = {"batches_received": 0, "tickers_received": 0}
         self.processing_stats = {"batches_processed": 0, "tickers_processed": 0}
 
-        logger.info("Trade Mini initialized")
+        logger.info("🎆 Trade Mini初期化完了")
 
     def _setup_logging(self):
         """ログ設定"""
@@ -173,7 +173,7 @@ class TradeMini:
                 name="MEXCWebSocketProcess",
             )
 
-            logger.info("🚀 MEXC WebSocket Process initialized")
+            logger.info("🚀 MEXC WebSocketプロセス初期化完了")
             self.use_dedicated_websocket_process = True
 
         except Exception as e:
@@ -186,7 +186,7 @@ class TradeMini:
             try:
                 self.websocket_process.start()
                 logger.info(
-                    f"✅ MEXC WebSocket Process started (PID: {self.websocket_process.pid})"
+                    f"✅ MEXC WebSocketプロセス開始 (PID: {self.websocket_process.pid})"
                 )
             except Exception as e:
                 logger.error(f"💥 Failed to start WebSocket process: {e}")
@@ -246,7 +246,7 @@ class TradeMini:
 
     async def initialize(self):
         """コンポーネント初期化"""
-        logger.info("Initializing components...")
+        logger.info("🔧 コンポーネント初期化中...")
 
         try:
             # WebSocket処理方式の判定
@@ -256,13 +256,13 @@ class TradeMini:
 
             if use_dedicated_process:
                 # 専用WebSocketプロセス使用
-                logger.info("🚀 Using dedicated WebSocket process for MEXC connection")
+                logger.info("🚀 MEXC接続に専用WebSocketプロセスを使用")
                 self._init_multiprocess_websocket()
             else:
                 # 従来のインラインWebSocket使用
-                logger.info("🔍 Using inline WebSocket for MEXC connection")
+                logger.info("🔍 MEXC接続にインラインWebSocketを使用")
                 self.mexc_client = MEXCClient(self.config)
-                logger.info("MEXC client created")
+                logger.info("MEXCクライアント作成完了")
 
             # Bybit クライアント（統計表示用にメインプロセスでも初期化）
             self.bybit_client = BybitClient(
@@ -271,27 +271,27 @@ class TradeMini:
                 self.config.bybit_environment,
                 self.config.bybit_api_url,
             )
-            logger.info("Bybit client initialized for main process")
+            logger.info("メインプロセス用Bybitクライアント初期化完了")
 
             # 銘柄マッピング管理
 
             self.symbol_mapper = SymbolMapper(self.bybit_client)
-            logger.info("Symbol mapper created")
+            logger.info("銘柄マッパー作成完了")
 
             # データ管理
             self.data_manager = DataManager(self.config)
-            logger.info("Data manager created")
+            logger.info("データマネージャー作成完了")
 
             # QuestDB クライアント
             self.questdb_client = QuestDBClient(self.config)
             self.trade_record_manager = QuestDBTradeRecordManager(self.questdb_client)
-            logger.info("QuestDB client created")
+            logger.info("QuestDBクライアント作成完了")
 
             # ポジション管理
             self.position_manager = PositionManager(
                 self.config, self.mexc_client, self.bybit_client, self.symbol_mapper
             )
-            logger.info("Position manager created")
+            logger.info("ポジションマネージャー作成完了")
 
             # 取引戦略（統計表示用のコンポーネント参照を含む）
             self.strategy = TradingStrategy(
@@ -302,17 +302,17 @@ class TradeMini:
                 symbol_mapper=self.symbol_mapper,
                 main_stats=self.stats,
             )
-            logger.info("Trading strategy created")
+            logger.info("取引戦略作成完了")
 
             # MEXC WebSocket 接続
             if self.use_dedicated_websocket_process:
                 # 専用プロセスでWebSocket処理
                 self._start_websocket_process()
-                logger.info("✅ Dedicated WebSocket process started")
+                logger.info("✅ 専用WebSocketプロセス開始完了")
             else:
                 # インラインでWebSocket処理
                 if not await self.mexc_client.start():
-                    raise Exception("Failed to connect to MEXC WebSocket")
+                    raise Exception("MEXC WebSocket接続に失敗しました")
 
                 # ティッカーバッチコールバック設定（パターンB'）
                 self.mexc_client.set_batch_callback(self._on_ticker_batch_received)
@@ -322,21 +322,21 @@ class TradeMini:
                     raise Exception("Failed to subscribe to all tickers")
 
             # 統計表示タイマー開始
-            logger.info("🔧 Starting statistics timer...")
+            logger.info("🔧 統計タイマー開始...")
             self._start_stats_timer()
-            logger.info("✅ Statistics timer started")
+            logger.info("✅ 統計タイマー開始完了")
 
             # WebSocket+pingモード以外でマルチプロセス開始
             if self.config.get("bybit.environment") != "websocket-ping_only":
                 # 🚀 真のマルチプロセスデータ処理ワーカー開始（GIL完全回避）
                 self._start_multiprocess_data_worker()
             else:
-                logger.info("🔍 WebSocket+ping mode: Multiprocess worker disabled")
+                logger.info("🔍 WebSocket+pingモード: マルチプロセスワーカー無効")
 
-            logger.info("All components initialized successfully")
+            logger.info("✅ 全コンポーネントの初期化成功")
 
         except Exception as e:
-            logger.error(f"Failed to initialize components: {e}")
+            logger.error(f"❌ コンポーネント初期化失敗: {e}")
             await self.shutdown()
             raise
 
@@ -451,7 +451,7 @@ class TradeMini:
 
     def _start_multiprocess_data_worker(self):
         """マルチプロセスデータ処理ワーカーを開始"""
-        logger.info("🚀 Starting multi-process data worker (true process separation)")
+        logger.info("🚀 マルチプロセスデータワーカー開始 (真のプロセス分離)")
 
         # 独立プロセスでデータ処理を実行
         self.data_processor = multiprocessing.Process(
@@ -461,7 +461,7 @@ class TradeMini:
         )
         self.data_processor.start()
         logger.info(
-            f"✅ Multi-process data worker started with PID: {self.data_processor.pid}"
+            f"✅ マルチプロセスデータワーカー開始 (PID: {self.data_processor.pid})"
         )
 
     @staticmethod
@@ -477,7 +477,7 @@ class TradeMini:
         logger.add("multiprocess_worker.log", rotation="1 MB")
 
         logger.info(
-            f"🔄 Multi-process data worker started in PID: {multiprocessing.current_process().pid}"
+            f"🔄 マルチプロセスデータワーカー開始 (PID: {multiprocessing.current_process().pid})"
         )
 
         last_heartbeat = time.time()
@@ -523,7 +523,7 @@ class TradeMini:
                 logger.error(f"Error in multi-process data worker: {e}")
                 time.sleep(0.1)  # エラー時は短時間待機
 
-        logger.info("Multi-process data worker shutdown completed")
+        logger.info("✅ マルチプロセスデータワーカーシャットダウン完了")
 
     def _check_multiprocess_health(self):
         """マルチプロセスワーカーのヘルスチェック"""
@@ -533,7 +533,7 @@ class TradeMini:
             # ワーカープロセスの生存確認
             if self.data_processor and not self.data_processor.is_alive():
                 logger.error(
-                    "🚨 Multi-process data worker is dead! Attempting restart..."
+                    "🚨 マルチプロセスデータワーカー停止！再起動試行中..."
                 )
                 self._restart_multiprocess_worker()
                 return
@@ -543,9 +543,9 @@ class TradeMini:
             heartbeat_age = current_time - last_heartbeat
 
             if heartbeat_age > 30.0:  # 30秒以上ハートビートがない
-                logger.warning(f"⚠️ Worker heartbeat stale: {heartbeat_age:.1f}s ago")
+                logger.warning(f"⚠️ ワーカーハートビート停止: {heartbeat_age:.1f}秒前")
                 if heartbeat_age > 60.0:  # 1分以上なら強制再起動
-                    logger.error("🚨 Worker heartbeat timeout! Restarting worker...")
+                    logger.error("🚨 ワーカーハートビートタイムアウト！ワーカー再起動中...")
                     self._restart_multiprocess_worker()
                     return
 
@@ -561,12 +561,12 @@ class TradeMini:
             )
 
         except Exception as e:
-            logger.error(f"Error in health check: {e}")
+            logger.error(f"ヘルスチェックエラー: {e}")
 
     def _restart_multiprocess_worker(self):
         """マルチプロセスワーカーを再起動"""
         try:
-            logger.info("🔄 Restarting multi-process data worker...")
+            logger.info("🔄 マルチプロセスデータワーカー再起動中...")
 
             # 古いプロセスを停止
             if self.data_processor:
@@ -574,7 +574,7 @@ class TradeMini:
                 self.data_processor.terminate()
                 self.data_processor.join(timeout=5)
                 if self.data_processor.is_alive():
-                    logger.warning("Force killing stuck worker process")
+                    logger.warning("停止中ワーカープロセスを強制終了")
                     self.data_processor.kill()
 
             # 新しいプロセスを開始
@@ -582,10 +582,10 @@ class TradeMini:
             self.worker_heartbeat.value = time.time()
             self._start_multiprocess_data_worker()
 
-            logger.info("✅ Multi-process worker restart completed")
+            logger.info("✅ マルチプロセスワーカー再起動完了")
 
         except Exception as e:
-            logger.error(f"Failed to restart multi-process worker: {e}")
+            logger.error(f"マルチプロセスワーカー再起動失敗: {e}")
 
     # マルチプロセス用グローバル変数（プロセス開始時に一度だけ初期化）
     _mp_config = None
@@ -600,30 +600,30 @@ class TradeMini:
     def _init_multiprocess_components():
         """マルチプロセス開始時に一度だけ実行される初期化"""
         try:
-            print("🔧 Starting multi-process component initialization...", flush=True)
-            logger.info("🔧 Starting multi-process component initialization...")
+            print("🔧 マルチプロセスコンポーネント初期化開始...", flush=True)
+            logger.info("🔧 マルチプロセスコンポーネント初期化開始...")
 
             TradeMini._mp_config = Config()
-            print("✅ Config initialized", flush=True)
-            logger.info("✅ Config initialized")
+            print("✅ 設定初期化完了", flush=True)
+            logger.info("✅ 設定初期化完了")
 
             TradeMini._mp_data_manager = DataManager(TradeMini._mp_config)
-            print("✅ DataManager initialized", flush=True)
-            logger.info("✅ DataManager initialized")
+            print("✅ データマネージャ初期化完了", flush=True)
+            logger.info("✅ データマネージャ初期化完了")
 
             # TradingStrategy初期化（PositionManagerを後で再設定）
             TradeMini._mp_strategy = TradingStrategy(
                 TradeMini._mp_config, TradeMini._mp_data_manager
             )
-            print("✅ TradingStrategy (initial) initialized", flush=True)
-            logger.info("✅ TradingStrategy (initial) initialized")
+            print("✅ トレーディング戦略(初期)初期化完了", flush=True)
+            logger.info("✅ トレーディング戦略(初期)初期化完了")
 
             # マルチプロセス用のMEXCClient初期化（PositionManager用）
             from mexc_client import MEXCWebSocketClient
 
             TradeMini._mp_mexc_client = MEXCWebSocketClient(TradeMini._mp_config)
-            print("✅ MEXCClient initialized for multiprocess", flush=True)
-            logger.info("✅ MEXCClient initialized for multiprocess")
+            print("✅ MEXCクライアントマルチプロセス初期化完了", flush=True)
+            logger.info("✅ MEXCクライアントマルチプロセス初期化完了")
 
             # マルチプロセス用のBybitClient初期化（各プロセスで必要なため独立したインスタンスを作成）
             # Bybitクライアントを作成（マルチプロセス環境のため独立したインスタンスが必要）
@@ -633,13 +633,13 @@ class TradeMini:
                 TradeMini._mp_config.bybit_environment,
                 TradeMini._mp_config.bybit_api_url,
             )
-            print("✅ Bybit client initialized for multiprocess", flush=True)
-            logger.info("✅ Bybit client initialized for multiprocess")
+            print("✅ Bybitクライアントマルチプロセス初期化完了", flush=True)
+            logger.info("✅ Bybitクライアントマルチプロセス初期化完了")
 
             # SymbolMapperを初期化
             TradeMini._mp_symbol_mapper = SymbolMapper(TradeMini._mp_bybit_client)
-            print("✅ SymbolMapper initialized for multiprocess", flush=True)
-            logger.info("✅ SymbolMapper initialized for multiprocess")
+            print("✅ 銘柄マッパーマルチプロセス初期化完了", flush=True)
+            logger.info("✅ 銘柄マッパーマルチプロセス初期化完了")
 
             # PositionManagerを初期化（config, mexc_client, bybit_client, symbol_mapperの順序）
             TradeMini._mp_position_manager = PositionManager(
@@ -648,38 +648,38 @@ class TradeMini:
                 TradeMini._mp_bybit_client,
                 TradeMini._mp_symbol_mapper,
             )
-            print("✅ PositionManager initialized for multiprocess", flush=True)
-            logger.info("✅ PositionManager initialized for multiprocess")
+            print("✅ ポジションマネージャマルチプロセス初期化完了", flush=True)
+            logger.info("✅ ポジションマネージャマルチプロセス初期化完了")
 
             # PositionManagerが初期化されたのでstrategyに参照を設定
             TradeMini._mp_strategy.position_manager = TradeMini._mp_position_manager
-            print("✅ Strategy configured with PositionManager", flush=True)
-            logger.info("✅ Strategy configured with PositionManager")
+            print("✅ 戦略にポジションマネージャを設定完了", flush=True)
+            logger.info("✅ 戦略にポジションマネージャを設定完了")
 
             # QuestDBクライアントを初期化
             TradeMini._mp_questdb_client = QuestDBClient(TradeMini._mp_config)
-            print("✅ QuestDB client initialized for multiprocess", flush=True)
-            logger.info("✅ QuestDB client initialized for multiprocess")
+            print("✅ QuestDBクライアントマルチプロセス初期化完了", flush=True)
+            logger.info("✅ QuestDBクライアントマルチプロセス初期化完了")
 
             # QuestDBクライアントもstrategyに設定
             TradeMini._mp_strategy.questdb_client = TradeMini._mp_questdb_client
-            print("✅ Strategy configured with QuestDB client", flush=True)
-            logger.info("✅ Strategy configured with QuestDB client")
+            print("✅ 戦略にQuestDBクライアントを設定完了", flush=True)
+            logger.info("✅ 戦略にQuestDBクライアントを設定完了")
 
             print(
-                "✅ Multi-process components initialization completed successfully",
+                "✅ マルチプロセスコンポーネント初期化成功",
                 flush=True,
             )
             logger.info(
-                "✅ Multi-process components initialization completed successfully"
+                "✅ マルチプロセスコンポーネント初期化成功"
             )
 
         except Exception as e:
-            print(f"❌ Failed to initialize multi-process components: {e}", flush=True)
-            logger.error(f"❌ Failed to initialize multi-process components: {e}")
+            print(f"❌ マルチプロセスコンポーネント初期化失敗: {e}", flush=True)
+            logger.error(f"❌ マルチプロセスコンポーネント初期化失敗: {e}")
             import traceback
 
-            print(f"Traceback: {traceback.format_exc()}", flush=True)
+            print(f"トレースバック: {traceback.format_exc()}", flush=True)
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise
 
@@ -699,7 +699,7 @@ class TradeMini:
         - データ管理 → DataManager（戦略内で呼び出し）
         """
         print(
-            f"🔥 BATCH ORCHESTRATOR: batch_id={batch_id}, tickers={len(tickers)}",
+            f"🔥 バッチ処理開始: ID={batch_id}, ティッカー数={len(tickers)}",
             flush=True,
         )
 
@@ -709,14 +709,14 @@ class TradeMini:
         init_start = time.time()
         try:
             if TradeMini._mp_config is None:
-                print("🔧 INITIALIZING MULTIPROCESS COMPONENTS...", flush=True)
+                print("🔧 マルチプロセスコンポーネント初期化中...", flush=True)
                 TradeMini._init_multiprocess_components()
             print(
-                f"🔍 Initialization completed in {time.time() - init_start:.3f}s",
+                f"🔍 初期化完了: {time.time() - init_start:.3f}秒",
                 flush=True,
             )
         except Exception as e:
-            print(f"❌ Initialization error: {e}", flush=True)
+            print(f"❌ 初期化エラー: {e}", flush=True)
             return
 
         try:
@@ -731,7 +731,7 @@ class TradeMini:
                 trades_executed = strategy_stats.get("trades_executed", 0)
             else:
                 print(
-                    "⚠️ Strategy not available, creating QuestDB data only", flush=True
+                    "⚠️ 戦略が利用できません。QuestDBデータのみ作成", flush=True
                 )
                 processed_count, signals_count, trades_executed = 0, 0, 0
 
@@ -794,28 +794,28 @@ class TradeMini:
 
             # 統計レポート
             total_time = time.time() - start_time
-            print(f"🕒 BATCH #{batch_id} SUMMARY:")
-            print(f"  📋 Tickers: {len(tickers)}")
-            print(f"  🧠 Strategy: {strategy_time:.3f}s")
-            print(f"  💾 QuestDB: {questdb_time:.3f}s")
-            print(f"  ⏱️  TOTAL: {total_time:.3f}s")
-            print(f"  📈 Processed: {processed_count}")
-            print(f"  🎯 Signals: {signals_count}")
-            print(f"  💼 Trades: {trades_executed}")
-            print(f"  💾 Saved: {questdb_saved}")
+            print(f"🕒 バッチ#{batch_id} 処理結果:")
+            print(f"  📋 ティッカー数: {len(tickers)}")
+            print(f"  🧠 戦略処理: {strategy_time:.3f}秒")
+            print(f"  💾 QuestDB: {questdb_time:.3f}秒")
+            print(f"  ⏱️  合計時間: {total_time:.3f}秒")
+            print(f"  📈 処理完了: {processed_count}")
+            print(f"  🎯 シグナル: {signals_count}")
+            print(f"  💼 取引実行: {trades_executed}")
+            print(f"  💾 保存済み: {questdb_saved}")
             print("", flush=True)
 
             logger.info(
-                f"⚡ Batch #{batch_id}: {processed_count}/{len(tickers)} processed, "
-                f"{signals_count} signals, {trades_executed} trades, {questdb_saved} saved in {total_time:.3f}s"
+                f"⚡ バッチ#{batch_id}完了: {processed_count}/{len(tickers)}処理済み, "
+                f"{signals_count}シグナル, {trades_executed}取引実行, {questdb_saved}件保存 ({total_time:.3f}秒)"
             )
 
         except Exception as e:
             import traceback
 
-            logger.error(f"Error in batch processing: {e}")
-            logger.error(f"Full traceback:\n{traceback.format_exc()}")
-            print(f"❌ Batch processing error: {e}", flush=True)
+            logger.error(f"バッチ処理エラー: {e}")
+            logger.error(f"詳細トレースバック:\n{traceback.format_exc()}")
+            print(f"❌ バッチ処理エラー: {e}", flush=True)
             traceback.print_exc()
 
     @staticmethod
@@ -1238,14 +1238,14 @@ class TradeMini:
 
         def show_stats():
             try:
-                logger.info("🔔 Statistics timer triggered")
+                logger.info("🔔 統計タイマー作動")
                 if self.running and self.strategy:
-                    logger.info("📊 Calling strategy.log_comprehensive_statistics...")
+                    logger.info("📊 戦略統計情報表示中...")
                     # 統計表示をstrategyに委任
                     self.strategy.log_comprehensive_statistics(
                         self.stats["start_time"], self.stats
                     )
-                    logger.info("✅ Statistics display completed")
+                    logger.info("✅ 統計情報表示完了")
                 else:
                     logger.warning(
                         f"⚠️ Statistics skipped: running={self.running}, strategy={self.strategy is not None}"
@@ -1265,7 +1265,7 @@ class TradeMini:
                     self.stats_timer.daemon = True
                     self.stats_timer.start()
 
-        logger.info("⏰ Initial statistics timer started (10 second interval)")
+        logger.info("⏰ 初期統計タイマー開始 (10秒間隔)")
         self.stats_timer = threading.Timer(10.0, show_stats)
         self.stats_timer.daemon = True
         self.stats_timer.start()
@@ -1286,7 +1286,7 @@ class TradeMini:
             logger.info("   - Only WebSocket receive + ping monitoring")
             logger.info("=" * 60)
 
-        logger.info("Starting Trade Mini...")
+        logger.info("🚀 Trade Mini開始...")
 
         try:
             # 初期化
@@ -1296,7 +1296,7 @@ class TradeMini:
             self._setup_signal_handlers()
 
             self.running = True
-            logger.info("Trade Mini is running. Press Ctrl+C to stop.")
+            logger.info("✅ Trade Mini稼働中。停止は Ctrl+C を押してください。")
 
             # メインループタスク作成
             main_tasks = []
@@ -1307,7 +1307,7 @@ class TradeMini:
                     self._process_websocket_data()
                 )
                 main_tasks.append(websocket_data_task)
-                logger.info("🔄 WebSocket data processing task started")
+                logger.info("🔄 WebSocketデータ処理タスク開始")
 
             # メインループタスク
             main_loop_task = asyncio.create_task(self._main_loop())
@@ -1392,7 +1392,7 @@ class TradeMini:
             logger.info("Terminating multi-process data worker...")
             self.data_processor.terminate()
             self.data_processor.join(timeout=5)
-            logger.info("Multi-process data worker terminated")
+            logger.info("🛑 マルチプロセスデータワーカー終了")
 
         try:
             # 統計タイマー停止
