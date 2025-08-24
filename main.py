@@ -685,27 +685,36 @@ class TradeMini:
 
     @staticmethod
     def _process_batch_lightning_fast(
-        tickers: list, batch_timestamp: float, batch_id: int, worker_heartbeat: multiprocessing.Value
+        tickers: list,
+        batch_timestamp: float,
+        batch_id: int,
+        worker_heartbeat: multiprocessing.Value,
     ):
         """
         🚀 責務分離済みバッチ処理（オーケストレータ）
-        
+
         各責務を適切なクラスに移譲：
         - 戦略処理（変動率確認、シグナル生成、取引実行）→ TradingStrategy
         - QuestDB書き込み → QuestDBClient
         - データ管理 → DataManager（戦略内で呼び出し）
         """
-        print(f"🔥 BATCH ORCHESTRATOR: batch_id={batch_id}, tickers={len(tickers)}", flush=True)
-        
+        print(
+            f"🔥 BATCH ORCHESTRATOR: batch_id={batch_id}, tickers={len(tickers)}",
+            flush=True,
+        )
+
         start_time = time.time()
-        
+
         # 初期化チェック（プロセス開始時に一度だけ）
         init_start = time.time()
         try:
             if TradeMini._mp_config is None:
                 print("🔧 INITIALIZING MULTIPROCESS COMPONENTS...", flush=True)
                 TradeMini._init_multiprocess_components()
-            print(f"🔍 Initialization completed in {time.time() - init_start:.3f}s", flush=True)
+            print(
+                f"🔍 Initialization completed in {time.time() - init_start:.3f}s",
+                flush=True,
+            )
         except Exception as e:
             print(f"❌ Initialization error: {e}", flush=True)
             return
@@ -721,9 +730,11 @@ class TradeMini:
                 signals_count = strategy_stats.get("signals_count", 0)
                 trades_executed = strategy_stats.get("trades_executed", 0)
             else:
-                print("⚠️ Strategy not available, creating QuestDB data only", flush=True)
+                print(
+                    "⚠️ Strategy not available, creating QuestDB data only", flush=True
+                )
                 processed_count, signals_count, trades_executed = 0, 0, 0
-                
+
             strategy_time = time.time() - strategy_start
 
             # 🚀 QuestDB書き込み（ILPライン形式で高速保存）
@@ -733,23 +744,25 @@ class TradeMini:
                 # ILPラインを生成してQuestDBに送信
                 ilp_lines = []
                 batch_ts_ns = int(batch_timestamp * 1_000_000_000)
-                
+
                 for ticker_data in tickers:
                     if not isinstance(ticker_data, dict):
                         continue
-                        
+
                     symbol = ticker_data.get("symbol", "")
                     price = ticker_data.get("lastPrice")
                     volume = ticker_data.get("volume24", "0")
                     mexc_timestamp = ticker_data.get("timestamp")
-                    
+
                     if symbol and price:
                         try:
                             price_f = float(price)
                             volume_f = float(volume)
-                            
+
                             # MEXCタイムスタンプを使用（ミリ秒→ナノ秒変換）
-                            if mexc_timestamp is not None and isinstance(mexc_timestamp, (int, float)):
+                            if mexc_timestamp is not None and isinstance(
+                                mexc_timestamp, (int, float)
+                            ):
                                 try:
                                     timestamp_ms = float(mexc_timestamp)
                                     timestamp_ns = int(timestamp_ms * 1_000_000)
@@ -757,23 +770,23 @@ class TradeMini:
                                     timestamp_ns = batch_ts_ns
                             else:
                                 timestamp_ns = batch_ts_ns
-                            
+
                             # ILP形式ライン生成
                             line = f"tick_data,symbol={symbol} price={price_f},volume={volume_f} {timestamp_ns}"
                             ilp_lines.append(line)
-                            
+
                         except (ValueError, TypeError):
                             continue
-                
+
                 # QuestDBクライアントに書き込み移譲
                 if ilp_lines:
-                    questdb_client = getattr(TradeMini, '_mp_questdb_client', None)
+                    questdb_client = getattr(TradeMini, "_mp_questdb_client", None)
                     if questdb_client is not None:
                         questdb_saved = questdb_client.save_ilp_lines(ilp_lines)
                     else:
                         # フォールバック：直接送信
                         questdb_saved = TradeMini._send_to_questdb_lightning(ilp_lines)
-                        
+
             questdb_time = time.time() - questdb_start
 
             # ハートビート更新
@@ -784,7 +797,7 @@ class TradeMini:
             print(f"🕒 BATCH #{batch_id} SUMMARY:")
             print(f"  📋 Tickers: {len(tickers)}")
             print(f"  🧠 Strategy: {strategy_time:.3f}s")
-            print(f"  💾 QuestDB: {questdb_time:.3f}s") 
+            print(f"  💾 QuestDB: {questdb_time:.3f}s")
             print(f"  ⏱️  TOTAL: {total_time:.3f}s")
             print(f"  📈 Processed: {processed_count}")
             print(f"  🎯 Signals: {signals_count}")
@@ -799,6 +812,7 @@ class TradeMini:
 
         except Exception as e:
             import traceback
+
             logger.error(f"Error in batch processing: {e}")
             logger.error(f"Full traceback:\n{traceback.format_exc()}")
             print(f"❌ Batch processing error: {e}", flush=True)
