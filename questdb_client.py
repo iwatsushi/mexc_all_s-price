@@ -2,7 +2,6 @@
 QuestDB保存クライアント
 """
 
-import json
 import logging
 import socket
 import threading

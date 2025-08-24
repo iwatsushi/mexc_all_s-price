@@ -3,8 +3,6 @@ Trade Mini - メインアプリケーション
 """
 
 import asyncio
-import gzip
-import json
 import logging
 import multiprocessing
 import signal
@@ -31,7 +29,7 @@ from mexc_client import MEXCClient, TickData
 from mexc_websocket_process import mexc_websocket_worker
 from position_manager import PositionManager
 from questdb_client import QuestDBClient, QuestDBTradeRecordManager
-from strategy import SignalType, TradingStrategy
+from strategy import TradingStrategy
 from symbol_mapper import SymbolMapper
 
 
@@ -267,8 +265,6 @@ class TradeMini:
                 logger.info("MEXC client created")
 
             # Bybit クライアント（統計表示用にメインプロセスでも初期化）
-            from bybit_client import BybitClient
-
             self.bybit_client = BybitClient(
                 self.config.bybit_api_key,
                 self.config.bybit_api_secret,
@@ -278,7 +274,6 @@ class TradeMini:
             logger.info("Bybit client initialized for main process")
 
             # 銘柄マッピング管理
-            from symbol_mapper import SymbolMapper
 
             self.symbol_mapper = SymbolMapper(self.bybit_client)
             logger.info("Symbol mapper created")
@@ -293,8 +288,6 @@ class TradeMini:
             logger.info("QuestDB client created")
 
             # ポジション管理
-            from position_manager import PositionManager
-
             self.position_manager = PositionManager(
                 self.config, self.mexc_client, self.bybit_client, self.symbol_mapper
             )
@@ -478,9 +471,6 @@ class TradeMini:
         worker_heartbeat: multiprocessing.Value,
     ):
         """独立プロセスでのデータ処理（GIL完全回避）"""
-        import time
-        from datetime import datetime, timedelta
-
         # プロセス独立ログ設定
         from loguru import logger
 
@@ -636,10 +626,6 @@ class TradeMini:
             logger.info("✅ MEXCClient initialized for multiprocess")
 
             # マルチプロセス用のBybitClient初期化（各プロセスで必要なため独立したインスタンスを作成）
-            from bybit_client import BybitClient
-            from position_manager import PositionManager
-            from symbol_mapper import SymbolMapper
-
             # Bybitクライアントを作成（マルチプロセス環境のため独立したインスタンスが必要）
             TradeMini._mp_bybit_client = BybitClient(
                 TradeMini._mp_config.bybit_api_key,
@@ -671,7 +657,6 @@ class TradeMini:
             logger.info("✅ Strategy configured with PositionManager")
 
             # QuestDBクライアントを初期化
-            from questdb_client import QuestDBClient
             TradeMini._mp_questdb_client = QuestDBClient(TradeMini._mp_config)
             print("✅ QuestDB client initialized for multiprocess", flush=True)
             logger.info("✅ QuestDB client initialized for multiprocess")
@@ -823,8 +808,6 @@ class TradeMini:
     def _send_to_questdb_lightning(ilp_lines: list) -> int:
         """QuestDBに超高速で一括送信（マルチプロセス用）"""
         try:
-            import socket  # マルチプロセス内で明示的にインポート
-
             # QuestDB ILP接続
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5.0)
@@ -835,14 +818,10 @@ class TradeMini:
             sock.sendall(ilp_data.encode("utf-8"))
             sock.close()
 
-            from loguru import logger
-
             logger.debug(f"✅ QuestDB ILP: {len(ilp_lines)} records sent successfully")
             return len(ilp_lines)
 
         except Exception as e:
-            from loguru import logger
-
             logger.warning(f"QuestDB write error: {e}")
             return 0
 
