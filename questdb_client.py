@@ -345,6 +345,39 @@ class QuestDBClient:
             logger.debug(f"Batch queued {len(ticks)} ticks for QuestDB")
         except Exception as e:
             logger.error(f"Error queuing batch tick data: {e}")
+    
+    def save_ilp_lines(self, ilp_lines: List[str]) -> int:
+        """
+        🚀 ILPライン形式でバッチデータを直接保存（main.pyから移譲）
+        
+        Args:
+            ilp_lines: ILP形式のライン配列
+            
+        Returns:
+            保存成功した件数
+        """
+        try:
+            if not ilp_lines:
+                return 0
+                
+            # ILPデータを結合
+            ilp_data = "\n".join(ilp_lines) + "\n"
+            
+            # 直接送信（バッファリングせず即座に書き込み）
+            if self._send_ilp_data(ilp_data):
+                with self._lock:
+                    self.stats["ticks_saved"] += len(ilp_lines)
+                    self.stats["last_flush"] = datetime.now()
+                
+                logger.debug(f"✅ QuestDB ILP: {len(ilp_lines)} records sent successfully")
+                return len(ilp_lines)
+            else:
+                logger.warning(f"❌ QuestDB ILP write failed for {len(ilp_lines)} records")
+                return 0
+                
+        except Exception as e:
+            logger.error(f"Error sending ILP lines to QuestDB: {e}")
+            return 0
 
     def save_trade_open(
         self,

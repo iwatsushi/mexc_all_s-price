@@ -4,6 +4,7 @@
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
@@ -757,3 +758,119 @@ class TradingStrategy:
         except Exception as e:
             logger.error(f"❌ CLOSE POSITION ERROR: {signal.symbol} - {e}")
             return False
+
+    def process_ticker_batch(self, tickers: list, batch_timestamp: float, batch_id: int) -> Dict[str, int]:
+        """
+        🚀 ティッカーバッチを処理（戦略責務）
+        
+        main.pyから移譲された処理：
+        - 各銘柄の変動率確認
+        - 戦略分析とシグナル生成
+        - オープン・クローズ発注
+        - ポジション管理
+        
+        Args:
+            tickers: ティッカーデータリスト
+            batch_timestamp: バッチタイムスタンプ
+            batch_id: バッチID
+            
+        Returns:
+            処理統計 {"processed_count": int, "signals_count": int, "trades_executed": int}
+        """
+        logger.info(f"🚀 Strategy processing batch #{batch_id}: {len(tickers)} tickers")
+        
+        start_time = time.time()
+        processed_count = 0
+        signals_count = 0
+        trades_executed = 0
+        
+        # バッチ受信時刻をナノ秒タイムスタンプで統一
+        batch_ts_ns = int(batch_timestamp * 1_000_000_000)
+        
+        # メインのティッカー処理ループ
+        for ticker_data in tickers:
+            if not isinstance(ticker_data, dict):
+                continue
+                
+            symbol = ticker_data.get("symbol", "")
+            price = ticker_data.get("lastPrice")
+            volume = ticker_data.get("volume24", "0")
+            mexc_timestamp = ticker_data.get("timestamp")
+            
+            if not symbol or not price:
+                continue
+                
+            try:
+                price_f = float(price)
+                volume_f = float(volume)
+                
+                # MEXCタイムスタンプを使用（ミリ秒→ナノ秒変換）
+                if mexc_timestamp is not None and isinstance(mexc_timestamp, (int, float)):
+                    try:
+                        timestamp_ms = float(mexc_timestamp)
+                        timestamp_ns = int(timestamp_ms * 1_000_000)  # ミリ秒→ナノ秒
+                    except (ValueError, TypeError):
+                        timestamp_ns = batch_ts_ns  # フォールバック
+                else:
+                    timestamp_ns = batch_ts_ns  # フォールバック
+                
+                # TickData作成
+                tick = TickData(
+                    symbol=symbol,
+                    price=price_f,
+                    volume=volume_f,
+                    timestamp=timestamp_ns,
+                )
+                
+                # 🚀 戦略責務：データマネージャーに追加
+                if self.data_manager is not None:
+                    self.data_manager.add_tick(tick)
+                
+                processed_count += 1
+                
+                # 🚀 戦略責務：変動率確認と戦略分析
+                signal = self.analyze_tick_optimized(tick)
+                
+                if signal.signal_type != SignalType.NONE:
+                    signals_count += 1
+                    logger.info(
+                        f"🚨 SIGNAL DETECTED: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f} ({signal.reason})"
+                    )
+                    
+                    # 🚀 戦略責務：取引実行
+                    if self._execute_trade_from_signal(signal):
+                        trades_executed += 1
+                        
+                    # ハートビート更新（5銘柄毎）
+                    if processed_count % 5 == 0:
+                        # worker_heartbeat更新は main.py のマルチプロセスワーカーで処理
+                        pass
+                        
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Error processing ticker {symbol}: {e}")
+                continue
+                
+        duration = time.time() - start_time
+        
+        logger.info(
+            f"✅ Strategy batch #{batch_id} completed: {processed_count}/{len(tickers)} processed, "
+            f"{signals_count} signals, {trades_executed} trades in {duration:.3f}s"
+        )
+        
+        return {
+            "processed_count": processed_count,
+            "signals_count": signals_count,
+            "trades_executed": trades_executed,
+            "duration": duration
+        }
+        
+    def get_all_price_changes(self, n_seconds: int) -> Dict[str, float]:
+        """
+        🚀 全銘柄の価格変動率を取得（戦略責務）
+        
+        main.pyから移譲された処理
+        """
+        if self.data_manager is None:
+            return {}
+            
+        return self.data_manager.get_all_price_changes_batch(n_seconds)
