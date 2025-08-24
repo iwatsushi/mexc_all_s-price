@@ -514,8 +514,10 @@ class TradeMini:
 
                 # 🕒 処理完了後ハートビート更新
                 worker_heartbeat.value = time.time()
+                batch_duration = time.time() - start_time
                 print(
-                    f"✅ Batch #{batch_id} completed in {time.time() - start_time:.2f}s",
+                    f"✅ Batch #{batch_id} TOTAL TIME: {batch_duration:.3f}s "
+                    f"({len(tickers)} tickers processed)",
                     flush=True,
                 )
 
@@ -720,6 +722,8 @@ class TradeMini:
         try:
             # 🚀 戦略処理（メイン責務を移譲）
             strategy_start = time.time()
+            print(f"📊 ステップ1: 戦略処理開始 ({len(tickers)}ティッカー)", flush=True)
+            
             if TradeMini._mp_strategy is not None:
                 strategy_stats = TradeMini._mp_strategy.process_ticker_batch(
                     tickers, batch_timestamp, batch_id, worker_heartbeat
@@ -732,9 +736,11 @@ class TradeMini:
                 processed_count, signals_count, trades_executed = 0, 0, 0
 
             strategy_time = time.time() - strategy_start
+            print(f"✅ ステップ1完了: 戦略処理 = {strategy_time:.3f}秒", flush=True)
 
             # 🚀 QuestDB書き込み（ILPライン形式で高速保存）
             questdb_start = time.time()
+            print(f"📊 ステップ2: QuestDB処理開始 (処理済み={processed_count})", flush=True)
             questdb_saved = 0
             if processed_count > 0:
                 # ILPラインを生成してQuestDBに送信
@@ -784,6 +790,7 @@ class TradeMini:
                         questdb_saved = TradeMini._send_to_questdb_lightning(ilp_lines)
 
             questdb_time = time.time() - questdb_start
+            print(f"✅ ステップ2完了: QuestDB処理 = {questdb_time:.3f}秒 (保存={questdb_saved})", flush=True)
 
             # ハートビート更新
             worker_heartbeat.value = time.time()

@@ -50,6 +50,9 @@ class SymbolTickData:
     def add_tick(self, tick: TickData):
         """ティックデータを追加（高速化版）"""
         with self._lock:
+            print(
+                f"ティックデータを追加 {tick.symbol} at {tick.timestamp} with price {tick.price}"
+            )
             # 重複データのチェック（高速化）
             if tick.timestamp in self.timestamp_index:
                 # 価格が更新された場合のみ処理
@@ -81,6 +84,7 @@ class SymbolTickData:
 
             # 🚀 クリーンアップ頻度制御（5分に1回のみ）
             import time
+
             current_time = time.time()
             if current_time - self.last_cleanup_time > self.cleanup_interval:
                 self._cleanup_old_data()

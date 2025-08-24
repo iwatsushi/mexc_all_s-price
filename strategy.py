@@ -756,7 +756,11 @@ class TradingStrategy:
             return False
 
     def process_ticker_batch(
-        self, tickers: list, batch_timestamp: float, batch_id: int, worker_heartbeat=None
+        self,
+        tickers: list,
+        batch_timestamp: float,
+        batch_id: int,
+        worker_heartbeat=None,
     ) -> Dict[str, int]:
         """
         🚀 ティッカーバッチを処理（戦略責務）
@@ -785,11 +789,20 @@ class TradingStrategy:
         # バッチ受信時刻をナノ秒タイムスタンプで統一
         batch_ts_ns = int(batch_timestamp * 1_000_000_000)
 
+        # 詳細ステップ時間計測
+        data_processing_time = 0
+        analysis_time = 0
+        trading_time = 0
+
         # メインのティッカー処理ループ
+        logger.info(f"🔄 バッチ#{batch_id}: {len(tickers)}銘柄の処理ループ開始")
         for i, ticker_data in enumerate(tickers):
             # 💓 100銘柄ごとにハートビート更新（タイムアウト防止）
             if worker_heartbeat is not None and i % 100 == 0:
                 worker_heartbeat.value = time.time()
+                logger.info(
+                    f"🔄 バッチ#{batch_id}: {i}/{len(tickers)}銘柄処理中 (進捗{i/len(tickers)*100:.1f}%)"
+                )
             if not isinstance(ticker_data, dict):
                 continue
 
@@ -826,13 +839,31 @@ class TradingStrategy:
                 )
 
                 # 🚀 戦略責務：データマネージャーに追加
+                data_step_start = time.time()
                 if self.data_manager is not None:
                     self.data_manager.add_tick(tick)
+                data_duration = time.time() - data_step_start
+                data_processing_time += data_duration
+
+                # 🔍 重いデータ処理の検出（50ms以上）
+                if data_duration > 0.05:
+                    logger.warning(
+                        f"⚠️ 重いデータ処理: {symbol} = {data_duration*1000:.1f}ms"
+                    )
 
                 processed_count += 1
 
                 # 🚀 戦略責務：変動率確認と戦略分析
+                analysis_step_start = time.time()
                 signal = self.analyze_tick_optimized(tick)
+                analysis_duration = time.time() - analysis_step_start
+                analysis_time += analysis_duration
+
+                # 🔍 重い処理の検出（100ms以上）
+                if analysis_duration > 0.1:
+                    logger.warning(
+                        f"⚠️ 重い戦略分析: {symbol} = {analysis_duration*1000:.1f}ms"
+                    )
 
                 if signal.signal_type != SignalType.NONE:
                     signals_count += 1
@@ -841,8 +872,10 @@ class TradingStrategy:
                     )
 
                     # 🚀 戦略責務：取引実行
+                    trading_step_start = time.time()
                     if self._execute_trade_from_signal(signal):
                         trades_executed += 1
+                    trading_time += time.time() - trading_step_start
 
                     # ハートビート更新（5銘柄毎）
                     if processed_count % 5 == 0:
@@ -852,9 +885,10 @@ class TradingStrategy:
             except (ValueError, TypeError) as e:
                 logger.warning(f"{symbol}ティッカー処理エラー: {e}")
                 continue
+            break
 
         duration = time.time() - start_time
-        
+
         # 💓 処理完了時のハートビート更新
         if worker_heartbeat is not None:
             worker_heartbeat.value = time.time()
@@ -866,7 +900,23 @@ class TradingStrategy:
             f"{signals_count}シグナル, {trades_executed}取引実行 ({duration:.3f}秒, "
             f"平均{avg_time_per_ticker:.2f}ms/銘柄)"
         )
-        
+
+        # 🔍 詳細パフォーマンス分析（ワーカー=1での計測用）
+        tickers_per_second = len(tickers) / duration if duration > 0 else 0
+        logger.info(
+            f"🚀 PERFORMANCE METRICS - Batch #{batch_id}: "
+            f"処理速度={tickers_per_second:.1f}銘柄/秒, "
+            f"総時間={duration:.3f}s, 平均={avg_time_per_ticker:.2f}ms/銘柄"
+        )
+
+        # 🔬 詳細ステップ別時間分析
+        logger.info(
+            f"🔬 DETAILED BREAKDOWN - Batch #{batch_id}: "
+            f"データ処理={data_processing_time:.3f}s, "
+            f"戦略分析={analysis_time:.3f}s, "
+            f"取引処理={trading_time:.3f}s"
+        )
+
         # 🐌 パフォーマンス警告（30秒以上の場合）
         if duration > 30.0:
             logger.warning(
