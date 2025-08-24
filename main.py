@@ -722,7 +722,7 @@ class TradeMini:
             strategy_start = time.time()
             if TradeMini._mp_strategy is not None:
                 strategy_stats = TradeMini._mp_strategy.process_ticker_batch(
-                    tickers, batch_timestamp, batch_id
+                    tickers, batch_timestamp, batch_id, worker_heartbeat
                 )
                 processed_count = strategy_stats.get("processed_count", 0)
                 signals_count = strategy_stats.get("signals_count", 0)

@@ -756,7 +756,7 @@ class TradingStrategy:
             return False
 
     def process_ticker_batch(
-        self, tickers: list, batch_timestamp: float, batch_id: int
+        self, tickers: list, batch_timestamp: float, batch_id: int, worker_heartbeat=None
     ) -> Dict[str, int]:
         """
         🚀 ティッカーバッチを処理（戦略責務）
@@ -786,7 +786,10 @@ class TradingStrategy:
         batch_ts_ns = int(batch_timestamp * 1_000_000_000)
 
         # メインのティッカー処理ループ
-        for ticker_data in tickers:
+        for i, ticker_data in enumerate(tickers):
+            # 💓 100銘柄ごとにハートビート更新（タイムアウト防止）
+            if worker_heartbeat is not None and i % 100 == 0:
+                worker_heartbeat.value = time.time()
             if not isinstance(ticker_data, dict):
                 continue
 
@@ -851,11 +854,25 @@ class TradingStrategy:
                 continue
 
         duration = time.time() - start_time
+        
+        # 💓 処理完了時のハートビート更新
+        if worker_heartbeat is not None:
+            worker_heartbeat.value = time.time()
 
+        # 📊 詳細タイミングログ
+        avg_time_per_ticker = duration / len(tickers) * 1000 if len(tickers) > 0 else 0
         logger.info(
             f"✅ 戦略バッチ#{batch_id}処理完了: {processed_count}/{len(tickers)}処理済み, "
-            f"{signals_count}シグナル, {trades_executed}取引実行 ({duration:.3f}秒)"
+            f"{signals_count}シグナル, {trades_executed}取引実行 ({duration:.3f}秒, "
+            f"平均{avg_time_per_ticker:.2f}ms/銘柄)"
         )
+        
+        # 🐌 パフォーマンス警告（30秒以上の場合）
+        if duration > 30.0:
+            logger.warning(
+                f"⚠️ DETAILED TIMING - SLOW BATCH: #{batch_id} took {duration:.1f}s "
+                f"({len(tickers)} tickers, {avg_time_per_ticker:.2f}ms/ticker)"
+            )
 
         return {
             "processed_count": processed_count,
