@@ -271,6 +271,9 @@ class MEXCWebSocketProcess:
 
             channel = data.get("channel", "unknown")
 
+            # 📊 受信メッセージの詳細をログ出力（デバッグ用）
+            logger.debug(f"🔍 Received message - Channel: {channel}, Data size: {len(str(data))}")
+
             if channel == "pong":
                 await self._handle_pong(data)
             elif channel == "push.tickers":
@@ -278,7 +281,7 @@ class MEXCWebSocketProcess:
             elif channel == "rs.sub.tickers":
                 logger.info(f"✅ 購読確認: {data.get('data')}")
             else:
-                logger.debug(f"🔍 Unhandled channel: {channel}")
+                logger.info(f"🔍 Unhandled channel: {channel}, Full data: {data}")
 
         except Exception as e:
             logger.warning(f"⚠️ Failed to process message: {e}")

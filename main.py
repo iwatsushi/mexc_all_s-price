@@ -452,17 +452,32 @@ class TradeMini:
     def _start_multiprocess_data_worker(self):
         """マルチプロセスデータ処理ワーカーを開始"""
         logger.info("🚀 マルチプロセスデータワーカー開始 (真のプロセス分離)")
-
+        
+        print("🔍 MAIN: Creating Process object", flush=True)
         # 独立プロセスでデータ処理を実行
-        self.data_processor = multiprocessing.Process(
-            target=self._multiprocess_data_worker,
-            args=(self.data_queue, self.processing_active, self.worker_heartbeat),
-            daemon=True,
-        )
-        self.data_processor.start()
+        try:
+            self.data_processor = multiprocessing.Process(
+                target=self._multiprocess_data_worker,
+                args=(self.data_queue, self.processing_active, self.worker_heartbeat),
+                daemon=True,
+            )
+            print("🔍 MAIN: Process object created successfully", flush=True)
+        except Exception as e:
+            print(f"🔍 MAIN: ERROR creating process: {e}", flush=True)
+            return
+            
+        print("🔍 MAIN: Starting process", flush=True)
+        try:
+            self.data_processor.start()
+            print(f"🔍 MAIN: Process.start() completed", flush=True)
+        except Exception as e:
+            print(f"🔍 MAIN: ERROR starting process: {e}", flush=True)
+            return
+            
         logger.info(
             f"✅ マルチプロセスデータワーカー開始 (PID: {self.data_processor.pid})"
         )
+        print(f"🔍 MAIN: Process started, PID={self.data_processor.pid}", flush=True)
 
     @staticmethod
     def _multiprocess_data_worker(
@@ -471,32 +486,55 @@ class TradeMini:
         worker_heartbeat: multiprocessing.Value,
     ):
         """独立プロセスでのデータ処理（GIL完全回避）"""
+        
+        # 🔍 デッドロック調査：最初のprintから
+        print(f"🔍 WORKER: Process started, PID={multiprocessing.current_process().pid}", flush=True)
+        
         # プロセス独立ログ設定
+        print(f"🔍 WORKER: Importing logger", flush=True)
         from loguru import logger
+        print(f"🔍 WORKER: Logger imported", flush=True)
 
+        print(f"🔍 WORKER: Adding log file", flush=True)
         logger.add("multiprocess_worker.log", rotation="1 MB")
+        print(f"🔍 WORKER: Log file added", flush=True)
 
         logger.info(
             f"🔄 マルチプロセスデータワーカー開始 (PID: {multiprocessing.current_process().pid})"
         )
+        print(f"🔍 WORKER: Initial log message sent", flush=True)
 
+        print(f"🔍 WORKER: Setting last_heartbeat", flush=True)
         last_heartbeat = time.time()
+        print(f"🔍 WORKER: last_heartbeat = {last_heartbeat}", flush=True)
 
+        print(f"🔍 WORKER: Accessing processing_active.value", flush=True)
+        try:
+            active_status = processing_active.value
+            print(f"🔍 WORKER: processing_active.value = {active_status}", flush=True)
+        except Exception as e:
+            print(f"🔍 WORKER: ERROR accessing processing_active: {e}", flush=True)
+
+        print(f"🔍 WORKER: Entering main loop", flush=True)
         while processing_active.value:
             try:
-                # 🩸 ハートビート更新（5秒毎）
+                # 🩸 ハートビート更新（1秒毎）- デッドロック対策
                 current_time = time.time()
-                if current_time - last_heartbeat >= 5.0:
-                    worker_heartbeat.value = current_time
-                    last_heartbeat = current_time
-                    logger.debug(
-                        f"💓 Worker heartbeat: {datetime.fromtimestamp(current_time).strftime('%H:%M:%S')}"
-                    )
+                if current_time - last_heartbeat >= 1.0:
+                    try:
+                        worker_heartbeat.value = current_time
+                        last_heartbeat = current_time
+                        print(f"💓 Worker heartbeat OK: {current_time}", flush=True)
+                    except Exception as e:
+                        print(f"❌ Heartbeat failed: {e}", flush=True)
 
-                # キューからデータを取得（タイムアウト付き）
+                # キューからデータを取得（タイムアウト付き）- デッドロック回避
                 try:
+                    print(f"💓 Worker attempting queue.get", flush=True)
                     batch_data = data_queue.get(timeout=1.0)
-                except:
+                    print(f"💓 Worker got batch data: {len(batch_data.get('tickers', []))} tickers", flush=True)
+                except Exception as e:
+                    print(f"💓 Worker queue.get timeout/error: {e}", flush=True)
                     continue  # タイムアウト時は次の循環へ
 
                 # 既存フォーマットに戻す
@@ -513,7 +551,12 @@ class TradeMini:
                 )
 
                 # 🕒 処理完了後ハートビート更新
-                worker_heartbeat.value = time.time()
+                try:
+                    worker_heartbeat.value = time.time()
+                    print(f"✅ Batch completed, heartbeat updated", flush=True)
+                except Exception as e:
+                    print(f"❌ Post-batch heartbeat failed: {e}", flush=True)
+                
                 batch_duration = time.time() - start_time
                 print(
                     f"✅ Batch #{batch_id} TOTAL TIME: {batch_duration:.3f}s "
@@ -597,6 +640,7 @@ class TradeMini:
     _mp_position_manager = None
     _mp_symbol_mapper = None
     _mp_questdb_client = None
+    _process_initialized = False  # プロセス初期化フラグ
 
     @staticmethod
     def _init_multiprocess_components():
@@ -708,9 +752,11 @@ class TradeMini:
         # 初期化チェック（プロセス開始時に一度だけ）
         init_start = time.time()
         try:
-            if TradeMini._mp_config is None:
+            # プロセス内でのみ有効な初期化フラグを使用
+            if not hasattr(TradeMini, '_process_initialized') or not TradeMini._process_initialized:
                 print("🔧 マルチプロセスコンポーネント初期化中...", flush=True)
                 TradeMini._init_multiprocess_components()
+                TradeMini._process_initialized = True  # プロセス内フラグを設定
             print(
                 f"🔍 初期化完了: {time.time() - init_start:.3f}秒",
                 flush=True,
@@ -719,9 +765,12 @@ class TradeMini:
             print(f"❌ 初期化エラー: {e}", flush=True)
             return
 
+        print("🔍 戦略処理ブロック開始", flush=True)
         try:
+            print("🔍 try文内部に到達", flush=True)
             # 🚀 戦略処理（メイン責務を移譲）
             strategy_start = time.time()
+            print("🔍 strategy_start設定完了", flush=True)
             print(f"📊 ステップ1: 戦略処理開始 ({len(tickers)}ティッカー)", flush=True)
             
             if TradeMini._mp_strategy is not None:
@@ -896,8 +945,14 @@ class TradeMini:
                     volume=float(ticker_data.get("volume24", 0)),
                 )
 
-                # データ管理
+                # データ管理（インメモリキャッシュ）
                 self.data_manager.add_tick(tick)
+                
+                # 🔍 デバッグ: add_tick呼び出し確認（最初の5件のみ）
+                if processed_count < 5:
+                    logger.info(f"🔍 DEBUG: add_tick called for {symbol} @ {price}")
+                elif processed_count == 5:
+                    logger.info("🔍 DEBUG: add_tick calls confirmed, suppressing further logs")
 
                 # 🎯 戦略分析（全銘柄対応 - エントリー機会を逃さない）
                 if trading_exchange == "bybit":

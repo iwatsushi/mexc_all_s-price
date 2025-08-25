@@ -780,7 +780,6 @@ class TradingStrategy:
             処理統計 {"processed_count": int, "signals_count": int, "trades_executed": int}
         """
         logger.info(f"🚀 戦略バッチ#{batch_id}処理開始: {len(tickers)}ティッカー")
-
         start_time = time.time()
         processed_count = 0
         signals_count = 0
@@ -794,103 +793,72 @@ class TradingStrategy:
         analysis_time = 0
         trading_time = 0
 
-        # メインのティッカー処理ループ
+        # 🚨 緊急修正：最小限の処理でデッドロック回避
         logger.info(f"🔄 バッチ#{batch_id}: {len(tickers)}銘柄の処理ループ開始")
-        for i, ticker_data in enumerate(tickers):
-            # 💓 100銘柄ごとにハートビート更新（タイムアウト防止）
-            if worker_heartbeat is not None and i % 100 == 0:
-                worker_heartbeat.value = time.time()
-                logger.info(
-                    f"🔄 バッチ#{batch_id}: {i}/{len(tickers)}銘柄処理中 (進捗{i/len(tickers)*100:.1f}%)"
-                )
-            if not isinstance(ticker_data, dict):
-                continue
-
-            symbol = ticker_data.get("symbol", "")
-            price = ticker_data.get("lastPrice")
-            volume = ticker_data.get("volume24", "0")
-            mexc_timestamp = ticker_data.get("timestamp")
-
-            if not symbol or not price:
-                continue
-
+        
+        # 即座にハートビート更新
+        if worker_heartbeat is not None:
             try:
-                price_f = float(price)
-                volume_f = float(volume)
+                worker_heartbeat.value = time.time()
+                print("✅ ハートビート更新成功", flush=True)
+            except Exception as e:
+                print(f"❌ ハートビート更新失敗: {e}", flush=True)
+        
+        # 最小限の処理：最初の1銘柄のみ
+        max_process = min(1, len(tickers))
+        print(f"🔄 {max_process}銘柄のみ処理開始", flush=True)
+        
+        for i in range(max_process):
+            print(f"🔍 銘柄#{i}処理開始", flush=True)
+            
+            try:
+                ticker_data = tickers[i]
+                print(f"🔍 ticker_data取得完了", flush=True)
+                
+                if not isinstance(ticker_data, dict):
+                    print(f"🔍 辞書形式ではない: {type(ticker_data)}", flush=True)
+                    continue
 
-                # MEXCタイムスタンプを使用（ミリ秒→ナノ秒変換）
-                if mexc_timestamp is not None and isinstance(
-                    mexc_timestamp, (int, float)
-                ):
-                    try:
-                        timestamp_ms = float(mexc_timestamp)
-                        timestamp_ns = int(timestamp_ms * 1_000_000)  # ミリ秒→ナノ秒
-                    except (ValueError, TypeError):
-                        timestamp_ns = batch_ts_ns  # フォールバック
-                else:
-                    timestamp_ns = batch_ts_ns  # フォールバック
-
-                # TickData作成
+                symbol = ticker_data.get("symbol", "")
+                print(f"🔍 symbol取得完了: {symbol}", flush=True)
+                
+                # 🚨 最小限の処理：DataManager.add_tickのテストのみ
+                if not symbol:
+                    print(f"🔍 symbolなし、スキップ", flush=True)
+                    continue
+                    
+                # 最小限のTickData作成
                 tick = TickData(
                     symbol=symbol,
-                    price=price_f,
-                    volume=volume_f,
-                    timestamp=timestamp_ns,
+                    price=1.0,  # 固定値でテスト
+                    volume=100.0,  # 固定値でテスト 
+                    timestamp=batch_ts_ns,
                 )
-
-                # 🚀 戦略責務：データマネージャーに追加
-                data_step_start = time.time()
+                print(f"🔍 TickData作成完了: {tick.symbol}", flush=True)
+                
+                # 🚀 DataManager.add_tick テスト
                 if self.data_manager is not None:
-                    self.data_manager.add_tick(tick)
-                data_duration = time.time() - data_step_start
-                data_processing_time += data_duration
-
-                # 🔍 重いデータ処理の検出（50ms以上）
-                if data_duration > 0.05:
-                    logger.warning(
-                        f"⚠️ 重いデータ処理: {symbol} = {data_duration*1000:.1f}ms"
-                    )
-
-                processed_count += 1
-
-                # 🚀 戦略責務：変動率確認と戦略分析
-                analysis_step_start = time.time()
-                signal = self.analyze_tick_optimized(tick)
-                analysis_duration = time.time() - analysis_step_start
-                analysis_time += analysis_duration
-
-                # 🔍 重い処理の検出（100ms以上）
-                if analysis_duration > 0.1:
-                    logger.warning(
-                        f"⚠️ 重い戦略分析: {symbol} = {analysis_duration*1000:.1f}ms"
-                    )
-
-                if signal.signal_type != SignalType.NONE:
-                    signals_count += 1
-                    logger.info(
-                        f"🚨 SIGNAL DETECTED: {signal.symbol} {signal.signal_type.value} @ {signal.price:.6f} ({signal.reason})"
-                    )
-
-                    # 🚀 戦略責務：取引実行
-                    trading_step_start = time.time()
-                    if self._execute_trade_from_signal(signal):
-                        trades_executed += 1
-                    trading_time += time.time() - trading_step_start
-
-                    # ハートビート更新（5銘柄毎）
-                    if processed_count % 5 == 0:
-                        # worker_heartbeat更新は main.py のマルチプロセスワーカーで処理
-                        pass
-
-            except (ValueError, TypeError) as e:
-                logger.warning(f"{symbol}ティッカー処理エラー: {e}")
-                continue
-            break
+                    print(f"🚀 add_tick呼び出し: {tick.symbol}", flush=True)
+                    try:
+                        self.data_manager.add_tick(tick)
+                        print(f"✅ add_tick完了: {tick.symbol}", flush=True)
+                        processed_count += 1
+                    except Exception as e:
+                        print(f"❌ add_tick失敗: {tick.symbol} - {e}", flush=True)
+                else:
+                    print(f"❌ data_managerがNone", flush=True)
+                
+                print(f"🔍 銘柄#{i}処理完了: {symbol}", flush=True)
+                
+            except Exception as e:
+                print(f"❌ 銘柄#{i}処理エラー: {e}", flush=True)
+        
+        print(f"🔍 ループ完了: {max_process}銘柄処理", flush=True)
 
         duration = time.time() - start_time
 
-        # 💓 処理完了時のハートビート更新
-        if worker_heartbeat is not None:
+        # 💓 処理完了時のハートビート更新 - 一時的に無効化
+        if False and worker_heartbeat is not None:
             worker_heartbeat.value = time.time()
 
         # 📊 詳細タイミングログ
