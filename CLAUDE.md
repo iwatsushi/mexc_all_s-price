@@ -4,7 +4,9 @@
 - 英文のエラーやログは原文を引用 → 直後に日本語で要約。
 - コードは原文維持、コメントと解説は日本語。
 - ファイル名・CLI出力など機械可読部分は原文のまま。
-- Dockerを起動してテストする場合は、buildし直してからにしてください。
+- Dockerを起動してテストする場合は、force-recreateでbuildし直してからにしてください。
+  docker-compose up -d --build --force-recreate
+
 
 
 ## プロジェクト概要

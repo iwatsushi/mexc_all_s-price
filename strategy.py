@@ -793,67 +793,82 @@ class TradingStrategy:
         analysis_time = 0
         trading_time = 0
 
-        # 🚨 緊急修正：最小限の処理でデッドロック回避
+        # 🚀 全銘柄処理ループ（制限解除）
         logger.info(f"🔄 バッチ#{batch_id}: {len(tickers)}銘柄の処理ループ開始")
         
         # 即座にハートビート更新
         if worker_heartbeat is not None:
             try:
                 worker_heartbeat.value = time.time()
-                print("✅ ハートビート更新成功", flush=True)
             except Exception as e:
-                print(f"❌ ハートビート更新失敗: {e}", flush=True)
+                logger.warning(f"❌ ハートビート更新失敗: {e}")
         
-        # 最小限の処理：最初の1銘柄のみ
-        max_process = min(1, len(tickers))
-        print(f"🔄 {max_process}銘柄のみ処理開始", flush=True)
-        
-        for i in range(max_process):
-            print(f"🔍 銘柄#{i}処理開始", flush=True)
-            
+        # 🚀 全銘柄を処理（制限なし）
+        for i, ticker_data in enumerate(tickers):
             try:
-                ticker_data = tickers[i]
-                print(f"🔍 ticker_data取得完了", flush=True)
+                # データ処理開始時間
+                data_start = time.time()
                 
                 if not isinstance(ticker_data, dict):
-                    print(f"🔍 辞書形式ではない: {type(ticker_data)}", flush=True)
                     continue
 
                 symbol = ticker_data.get("symbol", "")
-                print(f"🔍 symbol取得完了: {symbol}", flush=True)
-                
-                # 🚨 最小限の処理：DataManager.add_tickのテストのみ
                 if not symbol:
-                    print(f"🔍 symbolなし、スキップ", flush=True)
                     continue
                     
-                # 最小限のTickData作成
-                tick = TickData(
-                    symbol=symbol,
-                    price=1.0,  # 固定値でテスト
-                    volume=100.0,  # 固定値でテスト 
-                    timestamp=batch_ts_ns,
-                )
-                print(f"🔍 TickData作成完了: {tick.symbol}", flush=True)
-                
-                # 🚀 DataManager.add_tick テスト
-                if self.data_manager is not None:
-                    print(f"🚀 add_tick呼び出し: {tick.symbol}", flush=True)
-                    try:
+                # 本来のTickData作成（実際の価格データを使用）
+                try:
+                    price = float(ticker_data.get("lastPrice", 0))
+                    volume = float(ticker_data.get("volume", 0))
+                    
+                    if price <= 0:
+                        continue
+                        
+                    tick = TickData(
+                        symbol=symbol,
+                        price=price,
+                        volume=volume,
+                        timestamp=batch_ts_ns,
+                    )
+                    
+                    # DataManager.add_tick を呼び出し
+                    if self.data_manager is not None:
                         self.data_manager.add_tick(tick)
-                        print(f"✅ add_tick完了: {tick.symbol}", flush=True)
-                        processed_count += 1
-                    except Exception as e:
-                        print(f"❌ add_tick失敗: {tick.symbol} - {e}", flush=True)
-                else:
-                    print(f"❌ data_managerがNone", flush=True)
-                
-                print(f"🔍 銘柄#{i}処理完了: {symbol}", flush=True)
+                    
+                    # データ処理時間測定
+                    data_processing_time += time.time() - data_start
+                    
+                    # 🚀 戦略分析と取引実行
+                    analysis_start = time.time()
+                    trade_executed = self.process_tick_and_execute_trades(tick)
+                    analysis_time += time.time() - analysis_start
+                    
+                    processed_count += 1
+                    
+                    if trade_executed:
+                        trades_executed += 1
+                        
+                    # 100銘柄毎にハートビート更新でタイムアウト防止
+                    if processed_count % 100 == 0 and worker_heartbeat is not None:
+                        try:
+                            worker_heartbeat.value = time.time()
+                        except Exception:
+                            pass
+                        
+                except (ValueError, TypeError) as e:
+                    logger.debug(f"価格データ変換エラー {symbol}: {e}")
+                    continue
                 
             except Exception as e:
-                print(f"❌ 銘柄#{i}処理エラー: {e}", flush=True)
+                logger.error(f"❌ 銘柄#{i}処理エラー: {e}")
+                continue
         
-        print(f"🔍 ループ完了: {max_process}銘柄処理", flush=True)
+        # 定期的なハートビート更新（処理中）
+        if worker_heartbeat is not None:
+            try:
+                worker_heartbeat.value = time.time()
+            except Exception:
+                pass
 
         duration = time.time() - start_time
 
