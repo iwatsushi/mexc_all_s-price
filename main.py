@@ -35,6 +35,9 @@ from symbol_mapper import SymbolMapper
 
 class TradeMini:
     """Trade Mini メインアプリケーション"""
+    
+    # 🔒 クラス変数：バッチ処理の同期制御
+    _mp_batch_processing = False  # マルチプロセス用バッチ処理フラグ
 
     def __init__(self, config_path: str = "config.yml"):
         """
@@ -542,13 +545,28 @@ class TradeMini:
                 batch_timestamp = batch_data["timestamp"]
                 batch_id = batch_data["batch_id"]
 
-                # バッチ処理開始時間を記録
-                start_time = time.time()
+                # 🔒 バッチ処理の並行実行を防ぐ制御
+                print(f"🔍 Checking if batch processing is already running...", flush=True)
+                if hasattr(TradeMini, '_mp_batch_processing') and TradeMini._mp_batch_processing:
+                    print(f"⚠️ バッチ処理が既に実行中、スキップ: Batch #{batch_id}", flush=True)
+                    continue
+                
+                # バッチ処理フラグを設定
+                TradeMini._mp_batch_processing = True
+                print(f"🔒 バッチ処理開始: Batch #{batch_id}", flush=True)
 
-                # 🚀 高速処理（JSONからQuestDB形式への直接変換）
-                TradeMini._process_batch_lightning_fast(
-                    tickers, batch_timestamp, batch_id, worker_heartbeat
-                )
+                try:
+                    # バッチ処理開始時間を記録
+                    start_time = time.time()
+
+                    # 🚀 高速処理（JSONからQuestDB形式への直接変換）
+                    TradeMini._process_batch_lightning_fast(
+                        tickers, batch_timestamp, batch_id, worker_heartbeat
+                    )
+                finally:
+                    # バッチ処理フラグをクリア
+                    TradeMini._mp_batch_processing = False
+                    print(f"🔓 バッチ処理完了: Batch #{batch_id}", flush=True)
 
                 # 🕒 処理完了後ハートビート更新
                 try:
@@ -772,11 +790,15 @@ class TradeMini:
             strategy_start = time.time()
             print("🔍 strategy_start設定完了", flush=True)
             print(f"📊 ステップ1: 戦略処理開始 ({len(tickers)}ティッカー)", flush=True)
+            print(f"🔍 _mp_strategy is None: {TradeMini._mp_strategy is None}", flush=True)
+            print(f"🔍 _mp_strategy type: {type(TradeMini._mp_strategy)}", flush=True)
             
             if TradeMini._mp_strategy is not None:
+                print("🔍 Calling process_ticker_batch...", flush=True)
                 strategy_stats = TradeMini._mp_strategy.process_ticker_batch(
                     tickers, batch_timestamp, batch_id, worker_heartbeat
                 )
+                print("🔍 process_ticker_batch completed", flush=True)
                 processed_count = strategy_stats.get("processed_count", 0)
                 signals_count = strategy_stats.get("signals_count", 0)
                 trades_executed = strategy_stats.get("trades_executed", 0)
@@ -1108,10 +1130,10 @@ class TradeMini:
         """Semaphore制御付きバッチ処理（WebSocket受信保護）"""
         logger.info(f"🎯 Entering batch processing control for {len(tickers)} tickers")
 
-        # 🔍 監視：待機中のバッチ処理数をチェック
-        waiting_batches = 2 - self.batch_processing_semaphore._value
+        # 🔍 監視：バッチ処理が既に実行中かチェック
+        waiting_batches = 1 - self.batch_processing_semaphore._value
         if waiting_batches > 0:
-            logger.info(f"⏳ {waiting_batches}/2 batch tasks waiting")
+            logger.info(f"⏳ バッチ処理が既に実行中 - 待機中")
 
         logger.info(f"🔒 Acquiring batch processing semaphore...")
         async with self.batch_processing_semaphore:
