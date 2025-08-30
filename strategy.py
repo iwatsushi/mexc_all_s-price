@@ -114,8 +114,8 @@ class TradingStrategy:
         # 価格変動率キャッシュ（最新分析結果）
         self.price_changes: Dict[str, float] = {}
 
-        # スレッドセーフティ
-        self._lock = threading.Lock()
+        # シングルスレッド環境のためロック不要
+        # self._lock = threading.Lock()  # 削除：不要
 
         logger.info(f"💹 トレーディング戦略初期化完了:")
         logger.info(f"  - 価格比較期間: {self.price_comparison_seconds}秒")
@@ -134,19 +134,18 @@ class TradingStrategy:
         Returns:
             取引シグナル
         """
-        with self._lock:
-            # 既存ポジションの更新
-            if tick.symbol in self.position_trackers:
-                self._update_position_tracker(tick)
+        # 既存ポジションの更新
+        if tick.symbol in self.position_trackers:
+            self._update_position_tracker(tick)
 
-                # 決済シグナルをチェック
-                close_signal = self._check_close_signal(
-                    tick.symbol, tick.price, tick.timestamp
-                )
-                if close_signal.signal_type != SignalType.NONE:
-                    return close_signal
+            # 決済シグナルをチェック
+            close_signal = self._check_close_signal(
+                tick.symbol, tick.price, tick.timestamp
+            )
+            if close_signal.signal_type != SignalType.NONE:
+                return close_signal
 
-            # 新規エントリーシグナルをチェック
+        # 新規エントリーシグナルをチェック
             return self._check_entry_signal(tick)
 
     def _check_entry_signal(self, tick: TickData) -> TradingSignal:
@@ -334,19 +333,18 @@ class TradingStrategy:
             size: ポジションサイズ
             entry_time: エントリー時刻
         """
-        with self._lock:
-            tracker = PositionTracker(
-                symbol=symbol,
-                side=side,
-                entry_price=entry_price,
-                entry_time=entry_time,
-                size=size,
-                highest_price_after_entry=entry_price,
-                lowest_price_after_entry=entry_price,
-                last_update=entry_time,
-            )
+        tracker = PositionTracker(
+            symbol=symbol,
+            side=side,
+            entry_price=entry_price,
+            entry_time=entry_time,
+            size=size,
+            highest_price_after_entry=entry_price,
+            lowest_price_after_entry=entry_price,
+            last_update=entry_time,
+        )
 
-            self.position_trackers[symbol] = tracker
+        self.position_trackers[symbol] = tracker
             self.stats["active_positions"] = len(self.position_trackers)
             self.stats["total_positions_tracked"] += 1
 
@@ -362,22 +360,19 @@ class TradingStrategy:
         Returns:
             削除されたポジション追跡データ
         """
-        with self._lock:
-            tracker = self.position_trackers.pop(symbol, None)
-            if tracker:
-                self.stats["active_positions"] = len(self.position_trackers)
-                logger.info(f"ポジション追跡終了: {symbol}")
-            return tracker
+        tracker = self.position_trackers.pop(symbol, None)
+        if tracker:
+            self.stats["active_positions"] = len(self.position_trackers)
+            logger.info(f"ポジション追跡終了: {symbol}")
+        return tracker
 
     def get_position_tracker(self, symbol: str) -> Optional[PositionTracker]:
         """指定銘柄のポジション追跡データを取得"""
-        with self._lock:
-            return self.position_trackers.get(symbol)
+        return self.position_trackers.get(symbol)
 
     def get_active_positions(self) -> Dict[str, PositionTracker]:
         """アクティブなポジション追跡データを取得"""
-        with self._lock:
-            return self.position_trackers.copy()
+        return self.position_trackers.copy()
 
     def get_signals_summary(self, symbol: str = None) -> Dict[str, any]:
         """指定した期間のシグナル要約を取得"""
@@ -403,22 +398,21 @@ class TradingStrategy:
 
     def get_stats(self) -> Dict[str, any]:
         """戦略統計を取得"""
-        with self._lock:
-            return {
-                **self.stats,
-                "strategy_params": {
-                    "price_comparison_seconds": self.price_comparison_seconds,
-                    "long_threshold": self.long_threshold,
-                    "short_threshold": self.short_threshold,
-                    "reversal_threshold": self.reversal_threshold,
-                    "min_profit_percent": self.min_profit_percent,
-                },
-                "active_position_details": {
-                    symbol: {
-                        "side": tracker.side,
-                        "entry_price": tracker.entry_price,
-                        "max_profit": tracker.max_profit_percent,
-                        "updates": tracker.price_updates,
+        return {
+            **self.stats,
+            "strategy_params": {
+                "price_comparison_seconds": self.price_comparison_seconds,
+                "long_threshold": self.long_threshold,
+                "short_threshold": self.short_threshold,
+                "reversal_threshold": self.reversal_threshold,
+                "min_profit_percent": self.min_profit_percent,
+            },
+            "active_position_details": {
+                symbol: {
+                    "side": tracker.side,
+                    "entry_price": tracker.entry_price,
+                    "max_profit": tracker.max_profit_percent,
+                    "updates": tracker.price_updates,
                     }
                     for symbol, tracker in self.position_trackers.items()
                 },
@@ -427,12 +421,11 @@ class TradingStrategy:
     def get_price_change_percent(self, symbol: str) -> float:
         print(f"Retrieving price change percent for {symbol}", flush=True)
         """指定銘柄の最新価格変動率を取得"""
-        with self._lock:
-            print(
-                f"Price change percent for {symbol}: {self.price_changes.get(symbol, 0.0)}",
-                flush=True,
-            )
-            return self.price_changes.get(symbol, 0.0)
+        print(
+            f"Price change percent for {symbol}: {self.price_changes.get(symbol, 0.0)}",
+            flush=True,
+        )
+        return self.price_changes.get(symbol, 0.0)
 
     def log_comprehensive_statistics(self, start_time: datetime, main_stats: dict):
         """包括的な統計情報をログ出力"""
@@ -547,14 +540,13 @@ class TradingStrategy:
 
     def _analyze_existing_position(self, tick: TickData) -> TradingSignal:
         """既存ポジションの軽量分析"""
-        with self._lock:
-            tracker = self.position_trackers.get(tick.symbol)
-            if not tracker:
-                # ポジションが消失した場合
-                return self._create_no_signal(tick)
+        tracker = self.position_trackers.get(tick.symbol)
+        if not tracker:
+            # ポジションが消失した場合
+            return self._create_no_signal(tick)
 
-            self._update_position_tracker(tick)
-            return self._check_close_signal(tick.symbol, tick.price, tick.timestamp)
+        self._update_position_tracker(tick)
+        return self._check_close_signal(tick.symbol, tick.price, tick.timestamp)
 
     def _analyze_new_entry_fast(self, tick: TickData) -> TradingSignal:
         """新規エントリーの超高速分析 (キャッシュ最適化)"""

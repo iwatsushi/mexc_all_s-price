@@ -108,7 +108,7 @@ class PositionManager:
         }
 
         # スレッドセーフティ
-        self._lock = threading.Lock()
+        # self._lock = threading.Lock()  # 削除：マルチプロセス環境では不要
 
         # 初期化
         self._update_account_info()
@@ -257,34 +257,33 @@ class PositionManager:
         Returns:
             (可能かどうか, 理由)
         """
-        with self._lock:
-            # 同じ銘柄で既にポジションがある場合
-            if symbol in self.positions:
-                return False, f"Position already exists for {symbol}"
+        # 同じ銘柄で既にポジションがある場合
+        if symbol in self.positions:
+            return False, f"Position already exists for {symbol}"
 
-            # Bybitで取引可能な銘柄かチェック（Bybit取引の場合）
-            if self.trading_exchange == "bybit":
-                if not self.symbol_mapper.is_tradeable_on_bybit(symbol):
-                    return False, f"Symbol {symbol} is not tradeable on Bybit"
+        # Bybitで取引可能な銘柄かチェック（Bybit取引の場合）
+        if self.trading_exchange == "bybit":
+            if not self.symbol_mapper.is_tradeable_on_bybit(symbol):
+                return False, f"Symbol {symbol} is not tradeable on Bybit"
 
-            # 最大ポジション数チェック
-            if len(self.positions) >= self.max_concurrent_positions:
-                return (
-                    False,
-                    f"Maximum concurrent positions ({self.max_concurrent_positions}) reached",
-                )
+        # 最大ポジション数チェック
+        if len(self.positions) >= self.max_concurrent_positions:
+            return (
+                False,
+                f"Maximum concurrent positions ({self.max_concurrent_positions}) reached",
+            )
 
-            # 残高チェック
-            self._update_account_info()
-            usable_capital = self.account_balance * (self.capital_usage_percent / 100.0)
+        # 残高チェック
+        self._update_account_info()
+        usable_capital = self.account_balance * (self.capital_usage_percent / 100.0)
 
-            if usable_capital < self.min_order_size:
-                return (
-                    False,
-                    f"Insufficient balance. Available: {usable_capital:.2f} USDT",
-                )
+        if usable_capital < self.min_order_size:
+            return (
+                False,
+                f"Insufficient balance. Available: {usable_capital:.2f} USDT",
+            )
 
-            return True, "OK"
+        return True, "OK"
 
     def open_position(
         self, symbol: str, side: str, entry_price: float, timestamp: datetime = None
@@ -304,84 +303,81 @@ class PositionManager:
         if timestamp is None:
             timestamp = datetime.now()
 
-        with self._lock:
-            # ポジション開設可能性をチェック
-            can_open, reason = self.can_open_position(symbol)
-            if not can_open:
-                return False, reason, None
+        # ポジション開設可能性をチェック
+        can_open, reason = self.can_open_position(symbol)
+        if not can_open:
+            return False, reason, None
 
-            # ポジションサイズ計算
-            position_size, leverage, margin_required = self._calculate_position_size(
-                symbol, side, entry_price
+        # ポジションサイズ計算
+        position_size, leverage, margin_required = self._calculate_position_size(
+            symbol, side, entry_price
+        )
+
+        if position_size <= 0:
+            return False, "Invalid position size calculated", None
+
+        # マージンモード設定とレバレッジ設定
+        margin_mode = self._determine_margin_mode()
+
+        if self.trading_exchange == "bybit":
+            # Bybitでレバレッジ設定
+            leverage_success = self.bybit_client.set_leverage(symbol, leverage)
+            if leverage_success:
+                self.stats["margin_mode_switches"] += 1
+                logger.info(f"Set leverage for {symbol} to {leverage}x on Bybit")
+
+            # 注文実行（Bybit）
+            order_result = self.bybit_client.place_market_order(
+                symbol, side, position_size
+            )
+            order_success = order_result.success
+            order_id = order_result.order_id
+            order_message = order_result.message
+        else:
+            # MEXC
+            margin_success = self.mexc_client.set_margin_mode(symbol, margin_mode.value)
+            if margin_success:
+                self.stats["margin_mode_switches"] += 1
+                logger.info(f"Set margin mode for {symbol} to {margin_mode.value}")
+
+            # 注文実行（MEXC）
+            mexc_order_result = self.mexc_client.place_market_order(
+                symbol, side, position_size
+            )
+            order_success = mexc_order_result.success
+            order_id = mexc_order_result.order_id
+            order_message = mexc_order_result.message
+
+        if order_success:
+            # ポジション作成
+            position = Position(
+                symbol=symbol,
+                side=side,
+                size=position_size,
+                entry_price=entry_price,
+                entry_time=timestamp,
+                status=PositionStatus.OPEN,
+                entry_order_id=order_id,
+                max_leverage=leverage,
+                margin_mode=margin_mode,
+                margin_used=margin_required,
+                last_update=timestamp,
             )
 
-            if position_size <= 0:
-                return False, "Invalid position size calculated", None
+            self.positions[symbol] = position
+            self.total_margin_used += margin_required
+            self.stats["total_positions_opened"] += 1
+            self.stats["successful_orders"] += 1
 
-            # マージンモード設定とレバレッジ設定
-            margin_mode = self._determine_margin_mode()
+            logger.info(
+                f"Position opened on {self.trading_exchange.upper()}: {symbol} {side} size={position_size:.6f}"
+            )
+            return True, f"Position opened successfully", position
 
-            if self.trading_exchange == "bybit":
-                # Bybitでレバレッジ設定
-                leverage_success = self.bybit_client.set_leverage(symbol, leverage)
-                if leverage_success:
-                    self.stats["margin_mode_switches"] += 1
-                    logger.info(f"Set leverage for {symbol} to {leverage}x on Bybit")
-
-                # 注文実行（Bybit）
-                order_result = self.bybit_client.place_market_order(
-                    symbol, side, position_size
-                )
-                order_success = order_result.success
-                order_id = order_result.order_id
-                order_message = order_result.message
-            else:
-                # MEXC
-                margin_success = self.mexc_client.set_margin_mode(
-                    symbol, margin_mode.value
-                )
-                if margin_success:
-                    self.stats["margin_mode_switches"] += 1
-                    logger.info(f"Set margin mode for {symbol} to {margin_mode.value}")
-
-                # 注文実行（MEXC）
-                mexc_order_result = self.mexc_client.place_market_order(
-                    symbol, side, position_size
-                )
-                order_success = mexc_order_result.success
-                order_id = mexc_order_result.order_id
-                order_message = mexc_order_result.message
-
-            if order_success:
-                # ポジション作成
-                position = Position(
-                    symbol=symbol,
-                    side=side,
-                    size=position_size,
-                    entry_price=entry_price,
-                    entry_time=timestamp,
-                    status=PositionStatus.OPEN,
-                    entry_order_id=order_id,
-                    max_leverage=leverage,
-                    margin_mode=margin_mode,
-                    margin_used=margin_required,
-                    last_update=timestamp,
-                )
-
-                self.positions[symbol] = position
-                self.total_margin_used += margin_required
-                self.stats["total_positions_opened"] += 1
-                self.stats["successful_orders"] += 1
-
-                logger.info(
-                    f"Position opened on {self.trading_exchange.upper()}: {symbol} {side} size={position_size:.6f}"
-                )
-                return True, f"Position opened successfully", position
-
-            else:
-                self.stats["failed_orders"] += 1
-                logger.error(f"Failed to open position for {symbol}: {order_message}")
-                return False, f"Order failed: {order_message}", None
+        else:
+            self.stats["failed_orders"] += 1
+            logger.error(f"Failed to open position for {symbol}: {order_message}")
+            return False, f"Order failed: {order_message}", None
 
     def close_position(
         self, symbol: str, reason: str = ""
@@ -396,176 +392,163 @@ class PositionManager:
         Returns:
             (成功/失敗, メッセージ, ポジション情報)
         """
-        with self._lock:
-            position = self.positions.get(symbol)
-            if not position:
-                return False, f"No position found for {symbol}", None
+        position = self.positions.get(symbol)
+        if not position:
+            return False, f"No position found for {symbol}", None
 
-            if position.status != PositionStatus.OPEN:
-                return False, f"Position {symbol} is not in OPEN status", position
+        if position.status != PositionStatus.OPEN:
+            return False, f"Position {symbol} is not in OPEN status", position
 
-            # 決済注文実行
-            position.status = PositionStatus.CLOSING
+        # 決済注文実行
+        position.status = PositionStatus.CLOSING
 
-            if self.trading_exchange == "bybit":
-                order_result = self.bybit_client.close_position(symbol, position.side)
-                order_success = order_result.success
-                order_id = order_result.order_id
-                order_message = order_result.message
-            else:
-                mexc_order_result = self.mexc_client.close_position(
-                    symbol, position.side
-                )
-                order_success = mexc_order_result.success
-                order_id = mexc_order_result.order_id
-                order_message = mexc_order_result.message
+        if self.trading_exchange == "bybit":
+            order_result = self.bybit_client.close_position(symbol, position.side)
+            order_success = order_result.success
+            order_id = order_result.order_id
+            order_message = order_result.message
+        else:
+            mexc_order_result = self.mexc_client.close_position(symbol, position.side)
+            order_success = mexc_order_result.success
+            order_id = mexc_order_result.order_id
+            order_message = mexc_order_result.message
 
-            if order_success:
-                position.status = PositionStatus.CLOSED
-                position.close_order_id = order_id
-                position.last_update = datetime.now()
-
-                # 統計更新
-                self.total_margin_used -= position.margin_used
-                self.stats["total_positions_closed"] += 1
-                self.stats["successful_orders"] += 1
-                self.stats["total_realized_pnl"] += position.unrealized_pnl
-
-                # ポジション削除
-                closed_position = self.positions.pop(symbol)
-
-                logger.info(
-                    f"Position closed on {self.trading_exchange.upper()}: {symbol} {position.side} reason='{reason}'"
-                )
-                return True, "Position closed successfully", closed_position
-
-            else:
-                position.status = PositionStatus.ERROR
-                self.stats["failed_orders"] += 1
-                logger.error(f"Failed to close position for {symbol}: {order_message}")
-                return False, f"Close order failed: {order_message}", position
-
-    def update_position_pnl(self, symbol: str, current_price: float):
-        """ポジションのPnLを更新"""
-        with self._lock:
-            position = self.positions.get(symbol)
-            if not position or position.status != PositionStatus.OPEN:
-                return
-
-            # 未実現損益計算
-            if position.side == "LONG":
-                pnl = (current_price - position.entry_price) * position.size
-            else:  # SHORT
-                pnl = (position.entry_price - current_price) * position.size
-
-            position.unrealized_pnl = pnl
-            position.price_updates += 1
+        if order_success:
+            position.status = PositionStatus.CLOSED
+            position.close_order_id = order_id
             position.last_update = datetime.now()
 
             # 統計更新
-            total_unrealized = sum(
-                pos.unrealized_pnl
-                for pos in self.positions.values()
-                if pos.status == PositionStatus.OPEN
+            self.total_margin_used -= position.margin_used
+            self.stats["total_positions_closed"] += 1
+            self.stats["successful_orders"] += 1
+            self.stats["total_realized_pnl"] += position.unrealized_pnl
+
+            # ポジション削除
+            closed_position = self.positions.pop(symbol)
+
+            logger.info(
+                f"Position closed on {self.trading_exchange.upper()}: {symbol} {position.side} reason='{reason}'"
             )
-            self.stats["total_unrealized_pnl"] = total_unrealized
+            return True, "Position closed successfully", closed_position
+
+        else:
+            position.status = PositionStatus.ERROR
+            self.stats["failed_orders"] += 1
+            logger.error(f"Failed to close position for {symbol}: {order_message}")
+            return False, f"Close order failed: {order_message}", position
+
+    def update_position_pnl(self, symbol: str, current_price: float):
+        """ポジションのPnLを更新"""
+        position = self.positions.get(symbol)
+        if not position or position.status != PositionStatus.OPEN:
+            return
+
+        # 未実現損益計算
+        if position.side == "LONG":
+            pnl = (current_price - position.entry_price) * position.size
+        else:  # SHORT
+            pnl = (position.entry_price - current_price) * position.size
+
+        position.unrealized_pnl = pnl
+        position.price_updates += 1
+        position.last_update = datetime.now()
+
+        # 統計更新
+        total_unrealized = sum(
+            pos.unrealized_pnl
+            for pos in self.positions.values()
+            if pos.status == PositionStatus.OPEN
+        )
+        self.stats["total_unrealized_pnl"] = total_unrealized
 
     def get_position(self, symbol: str) -> Optional[Position]:
         """特定銘柄のポジション取得"""
-        with self._lock:
-            return self.positions.get(symbol)
+        return self.positions.get(symbol)
 
     def get_all_positions(self) -> Dict[str, Position]:
         """全ポジション取得"""
-        with self._lock:
-            return self.positions.copy()
+        return self.positions.copy()
 
     def get_open_positions(self) -> Dict[str, Position]:
         """オープン中のポジション取得"""
-        with self._lock:
-            return {
-                symbol: pos
-                for symbol, pos in self.positions.items()
-                if pos.status == PositionStatus.OPEN
-            }
+        return {
+            symbol: pos
+            for symbol, pos in self.positions.items()
+            if pos.status == PositionStatus.OPEN
+        }
 
     def get_position_symbols(self) -> List[str]:
         """ポジションを持つ銘柄一覧を取得"""
-        with self._lock:
-            return list(self.positions.keys())
+        return list(self.positions.keys())
 
     def get_available_slots(self) -> int:
         """利用可能なポジション枠数を取得"""
-        with self._lock:
-            return max(0, self.max_concurrent_positions - len(self.positions))
+        return max(0, self.max_concurrent_positions - len(self.positions))
 
     def get_portfolio_summary(self) -> Dict[str, any]:
         """ポートフォリオ要約を取得"""
-        with self._lock:
-            self._update_account_info()
+        self._update_account_info()
 
-            open_positions = self.get_open_positions()
-            total_unrealized_pnl = sum(
-                pos.unrealized_pnl for pos in open_positions.values()
-            )
+        open_positions = self.get_open_positions()
+        total_unrealized_pnl = sum(
+            pos.unrealized_pnl for pos in open_positions.values()
+        )
 
-            return {
-                "account_balance": self.account_balance,
-                "available_balance": self.available_balance,
-                "total_margin_used": self.total_margin_used,
-                "total_unrealized_pnl": total_unrealized_pnl,
-                "open_positions_count": len(open_positions),
-                "available_slots": self.get_available_slots(),
-                "capital_usage_percent": self.capital_usage_percent,
-                "margin_mode": self._determine_margin_mode().value,
-                "positions": {
-                    symbol: {
-                        "side": pos.side,
-                        "size": pos.size,
-                        "entry_price": pos.entry_price,
-                        "unrealized_pnl": pos.unrealized_pnl,
-                        "margin_used": pos.margin_used,
-                        "leverage": pos.max_leverage,
-                    }
-                    for symbol, pos in open_positions.items()
-                },
-            }
+        return {
+            "account_balance": self.account_balance,
+            "available_balance": self.available_balance,
+            "total_margin_used": self.total_margin_used,
+            "total_unrealized_pnl": total_unrealized_pnl,
+            "open_positions_count": len(open_positions),
+            "available_slots": self.get_available_slots(),
+            "capital_usage_percent": self.capital_usage_percent,
+            "margin_mode": self._determine_margin_mode().value,
+            "positions": {
+                symbol: {
+                    "side": pos.side,
+                    "size": pos.size,
+                    "entry_price": pos.entry_price,
+                    "unrealized_pnl": pos.unrealized_pnl,
+                    "margin_used": pos.margin_used,
+                    "leverage": pos.max_leverage,
+                }
+                for symbol, pos in open_positions.items()
+            },
+        }
 
     def get_stats(self) -> Dict[str, any]:
         """統計情報を取得"""
-        with self._lock:
-            return {
-                **self.stats,
-                "current_positions": len(self.positions),
-                "available_slots": self.get_available_slots(),
-                "total_margin_used": self.total_margin_used,
-                "account_balance": self.account_balance,
-                "portfolio_value": self.account_balance
-                + self.stats["total_unrealized_pnl"],
-            }
+        return {
+            **self.stats,
+            "current_positions": len(self.positions),
+            "available_slots": self.get_available_slots(),
+            "total_margin_used": self.total_margin_used,
+            "account_balance": self.account_balance,
+            "portfolio_value": self.account_balance
+            + self.stats["total_unrealized_pnl"],
+        }
 
     def cleanup_closed_positions(self):
         """クローズ済みポジションをクリーンアップ"""
-        with self._lock:
-            closed_symbols = [
-                symbol
-                for symbol, pos in self.positions.items()
-                if pos.status == PositionStatus.CLOSED
-            ]
+        closed_symbols = [
+            symbol
+            for symbol, pos in self.positions.items()
+            if pos.status == PositionStatus.CLOSED
+        ]
 
-            for symbol in closed_symbols:
-                del self.positions[symbol]
-                logger.debug(f"Cleaned up closed position: {symbol}")
+        for symbol in closed_symbols:
+            del self.positions[symbol]
+            logger.debug(f"Cleaned up closed position: {symbol}")
 
     def shutdown(self):
         """ポジション管理をシャットダウン"""
         logger.info("Shutting down PositionManager")
 
-        with self._lock:
-            # すべてのオープンポジションを強制決済
-            open_positions = self.get_open_positions()
-            for symbol in open_positions.keys():
-                logger.warning(f"Force closing position: {symbol}")
-                self.close_position(symbol, "Shutdown")
+        # すべてのオープンポジションを強制決済
+        open_positions = self.get_open_positions()
+        for symbol in open_positions.keys():
+            logger.warning(f"Force closing position: {symbol}")
+            self.close_position(symbol, "Shutdown")
 
         logger.info("PositionManager shutdown completed")

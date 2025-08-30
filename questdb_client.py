@@ -73,7 +73,7 @@ class QuestDBClient:
         }
 
         # スレッドセーフティ
-        self._lock = threading.Lock()
+        # self._lock = threading.Lock()  # ロック削除
 
         # 接続テスト
         self._test_connection()
@@ -152,12 +152,11 @@ class QuestDBClient:
                 sock.close()
 
                 # 成功時はエラーカウントをリセット
-                with self._lock:
-                    if self.stats["write_errors"] > 0:
-                        logger.info(
-                            f"QuestDB ILP connection restored after {self.stats['write_errors']} errors"
-                        )
-                        self.stats["write_errors"] = 0
+                if self.stats["write_errors"] > 0:
+                    logger.info(
+                        f"QuestDB ILP connection restored after {self.stats['write_errors']} errors"
+                    )
+                    self.stats["write_errors"] = 0
 
                 return True
 
@@ -166,12 +165,11 @@ class QuestDBClient:
                     time.sleep(retry_delay)
                 else:
                     # 最終試行失敗時のみエラーログ（頻度削減）
-                    with self._lock:
-                        self.stats["write_errors"] += 1
-                        if self.stats["write_errors"] % 10 == 1:
-                            logger.warning(
-                                f"QuestDB ILP connection failed after {max_retries} retries (error #{self.stats['write_errors']}): {e}"
-                            )
+                    self.stats["write_errors"] += 1
+                    if self.stats["write_errors"] % 10 == 1:
+                        logger.warning(
+                            f"QuestDB ILP connection failed after {max_retries} retries (error #{self.stats['write_errors']}): {e}"
+                        )
                     return False
 
         return False
@@ -201,9 +199,8 @@ class QuestDBClient:
 
                 if should_flush and batch:
                     if self._flush_tick_batch(batch):
-                        with self._lock:
-                            self.stats["ticks_saved"] += len(batch)
-                            self.stats["last_flush"] = datetime.now()
+                        self.stats["ticks_saved"] += len(batch)
+                        self.stats["last_flush"] = datetime.now()
 
                     batch.clear()
                     last_flush = current_time
@@ -243,8 +240,7 @@ class QuestDBClient:
 
                 if should_flush and batch:
                     if self._flush_trade_batch(batch):
-                        with self._lock:
-                            self.stats["trades_saved"] += len(batch)
+                        self.stats["trades_saved"] += len(batch)
 
                     batch.clear()
                     last_flush = current_time
@@ -362,9 +358,8 @@ class QuestDBClient:
 
             # 直接送信（バッファリングせず即座に書き込み）
             if self._send_ilp_data(ilp_data):
-                with self._lock:
-                    self.stats["ticks_saved"] += len(ilp_lines)
-                    self.stats["last_flush"] = datetime.now()
+                self.stats["ticks_saved"] += len(ilp_lines)
+                self.stats["last_flush"] = datetime.now()
 
                 logger.debug(
                     f"✅ QuestDB ILP: {len(ilp_lines)} records sent successfully"
@@ -471,13 +466,12 @@ class QuestDBClient:
 
     def get_stats(self) -> Dict[str, Any]:
         """統計情報を取得"""
-        with self._lock:
-            return {
-                **self.stats,
-                "tick_buffer_size": self.tick_buffer.qsize(),
-                "trade_buffer_size": self.trade_record_buffer.qsize(),
-                "worker_running": self.running,
-            }
+        return {
+            **self.stats,
+            "tick_buffer_size": self.tick_buffer.qsize(),
+            "trade_buffer_size": self.trade_record_buffer.qsize(),
+            "worker_running": self.running,
+        }
 
     def flush_all(self):
         """全バッファを強制フラッシュ"""
@@ -513,37 +507,36 @@ class QuestDBTradeRecordManager:
     def __init__(self, questdb_client: QuestDBClient):
         self.questdb = questdb_client
         self.open_trades: Dict[str, TradeRecord] = {}
-        self._lock = threading.Lock()
+        # self._lock = threading.Lock()  # ロック削除
 
     def record_trade_open(self, position: Position) -> str:
         """取引オープンを記録"""
         trade_id = f"{position.symbol}_{int(position.entry_time.timestamp())}"
 
-        with self._lock:
-            # 取引記録作成
-            record = TradeRecord(
-                id=trade_id,
-                symbol=position.symbol,
-                side=position.side,
-                open_time=position.entry_time,
-                open_price=position.entry_price,
-                quantity_symbol=position.size,
-                quantity_usdt=position.size * position.entry_price,
-            )
+        # 取引記録作成
+        record = TradeRecord(
+            id=trade_id,
+            symbol=position.symbol,
+            side=position.side,
+            open_time=position.entry_time,
+            open_price=position.entry_price,
+            quantity_symbol=position.size,
+            quantity_usdt=position.size * position.entry_price,
+        )
 
-            # メモリ上で管理
-            self.open_trades[trade_id] = record
+        # メモリ上で管理
+        self.open_trades[trade_id] = record
 
-            # QuestDBに保存
-            self.questdb.save_trade_open(
-                trade_id=trade_id,
-                symbol=position.symbol,
-                side=position.side,
-                open_time=position.entry_time,
-                open_price=position.entry_price,
-                quantity_symbol=position.size,
-                quantity_usdt=position.size * position.entry_price,
-            )
+        # QuestDBに保存
+        self.questdb.save_trade_open(
+            trade_id=trade_id,
+            symbol=position.symbol,
+            side=position.side,
+            open_time=position.entry_time,
+            open_price=position.entry_price,
+            quantity_symbol=position.size,
+            quantity_usdt=position.size * position.entry_price,
+        )
 
         logger.info(f"Trade open recorded: {trade_id}")
         return trade_id
@@ -557,33 +550,31 @@ class QuestDBTradeRecordManager:
         fees: float = 0.0,
     ):
         """取引決済を記録"""
-        with self._lock:
-            record = self.open_trades.get(trade_id)
-            if not record:
-                logger.warning(f"Open trade record not found: {trade_id}")
-                return
+        record = self.open_trades.get(trade_id)
+        if not record:
+            logger.warning(f"Open trade record not found: {trade_id}")
+            return
 
-            # 決済情報を更新
-            record.close_time = close_time
-            record.close_price = close_price
-            record.realized_pnl = realized_pnl
-            record.fees = fees
+        # 決済情報を更新
+        record.close_time = close_time
+        record.close_price = close_price
+        record.realized_pnl = realized_pnl
+        record.fees = fees
 
-            # QuestDBに保存
-            self.questdb.save_trade_close(
-                trade_id=trade_id,
-                close_time=close_time,
-                close_price=close_price,
-                realized_pnl=realized_pnl,
-                fees=fees,
-            )
+        # QuestDBに保存
+        self.questdb.save_trade_close(
+            trade_id=trade_id,
+            close_time=close_time,
+            close_price=close_price,
+            realized_pnl=realized_pnl,
+            fees=fees,
+        )
 
-            # メモリから削除
-            del self.open_trades[trade_id]
+        # メモリから削除
+        del self.open_trades[trade_id]
 
         logger.info(f"Trade close recorded: {trade_id}")
 
     def get_open_trades_count(self) -> int:
         """オープン取引数を取得"""
-        with self._lock:
-            return len(self.open_trades)
+        return len(self.open_trades)

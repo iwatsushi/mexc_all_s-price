@@ -329,13 +329,11 @@ class DataManager:
         for symbol in empty_symbols:
             del self.symbol_data[symbol]
 
-        # 統計更新
+        # Statistics update
         self.stats["active_symbols"] = len(self.symbol_data)
         self.stats["last_cleanup"] = time.time()
 
-            logger.debug(
-                f"Cleanup completed. Active symbols: {self.stats['active_symbols']}"
-            )
+        logger.debug("Cleanup completed. Active symbols: %d", self.stats['active_symbols'])
 
     def get_stats(self) -> Dict[str, any]:
         """統計情報を取得"""
