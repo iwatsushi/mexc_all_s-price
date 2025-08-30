@@ -44,51 +44,50 @@ class SymbolTickData:
             "price_updates": 0,
         }
 
-        # スレッドセーフティ用ロック
-        self._lock = threading.Lock()
+        # シングルスレッド環境のためロック不要
+        # self._lock = threading.Lock()  # 削除：不要
 
     def add_tick(self, tick: TickData):
         """ティックデータを追加（高速化版）"""
-        with self._lock:
-            print(
-                f"ティックデータを追加 {tick.symbol} at {tick.timestamp} with price {tick.price}"
-            )
-            # 重複データのチェック（高速化）
-            if tick.timestamp in self.timestamp_index:
-                # 価格が更新された場合のみ処理
-                existing_tick = self.timestamp_index[tick.timestamp]
-                if existing_tick.price != tick.price:
-                    # 既存データを更新
-                    existing_tick.price = tick.price
-                    existing_tick.volume = tick.volume
-                    self.stats["price_updates"] += 1
-                return
+        print(
+            f"ティックデータを追加 {tick.symbol} at {tick.timestamp} with price {tick.price}"
+        )
+        # 重複データのチェック（高速化）
+        if tick.timestamp in self.timestamp_index:
+            # 価格が更新された場合のみ処理
+            existing_tick = self.timestamp_index[tick.timestamp]
+            if existing_tick.price != tick.price:
+                # 既存データを更新
+                existing_tick.price = tick.price
+                existing_tick.volume = tick.volume
+                self.stats["price_updates"] += 1
+            return
 
-            # 新しいティックデータを追加（高速化）
-            self.tick_data.append(tick)
-            self.timestamp_index[tick.timestamp] = tick
-            self.latest_tick = tick
-            self.stats["total_ticks"] += 1
+        # 新しいティックデータを追加（高速化）
+        self.tick_data.append(tick)
+        self.timestamp_index[tick.timestamp] = tick
+        self.latest_tick = tick
+        self.stats["total_ticks"] += 1
 
-            # 統計更新（高速化）
-            if (
-                not self.stats["oldest_tick"]
-                or tick.timestamp < self.stats["oldest_tick"]
-            ):
-                self.stats["oldest_tick"] = tick.timestamp
-            if (
-                not self.stats["newest_tick"]
-                or tick.timestamp > self.stats["newest_tick"]
-            ):
-                self.stats["newest_tick"] = tick.timestamp
+        # 統計更新（高速化）
+        if (
+            not self.stats["oldest_tick"]
+            or tick.timestamp < self.stats["oldest_tick"]
+        ):
+            self.stats["oldest_tick"] = tick.timestamp
+        if (
+            not self.stats["newest_tick"]
+            or tick.timestamp > self.stats["newest_tick"]
+        ):
+            self.stats["newest_tick"] = tick.timestamp
 
-            # 🚀 クリーンアップ頻度制御（5分に1回のみ）
-            import time
+        # 🚀 クリーンアップ頻度制御（5分に1回のみ）
+        import time
 
-            current_time = time.time()
-            if current_time - self.last_cleanup_time > self.cleanup_interval:
-                self._cleanup_old_data()
-                self.last_cleanup_time = current_time
+        current_time = time.time()
+        if current_time - self.last_cleanup_time > self.cleanup_interval:
+            self._cleanup_old_data()
+            self.last_cleanup_time = current_time
 
     def _cleanup_old_data(self):
         """古いデータを削除（retention_hours を超えたデータ）"""
@@ -109,93 +108,90 @@ class SymbolTickData:
 
     def get_price_n_seconds_ago(self, n_seconds: int) -> Optional[float]:
         """🚀 N秒前の価格を高速取得（早期終了版）"""
-        with self._lock:
-            if not self.latest_tick or len(self.tick_data) < 2:
-                return None
+        if not self.latest_tick or len(self.tick_data) < 2:
+            return None
 
-            if not isinstance(self.latest_tick.timestamp, int):
-                return None
+        if not isinstance(self.latest_tick.timestamp, int):
+            return None
 
-            try:
-                target_time_ns = self.latest_tick.timestamp - (
-                    n_seconds * 1_000_000_000
-                )
-            except (TypeError, AttributeError):
-                return None
+        try:
+            target_time_ns = self.latest_tick.timestamp - (
+                n_seconds * 1_000_000_000
+            )
+        except (TypeError, AttributeError):
+            return None
 
-            # 🚀 逆順検索 + 早期終了で高速化
-            closest_tick = None
-            min_time_diff_ns = float("inf")
+        # 🚀 逆順検索 + 早期終了で高速化
+        closest_tick = None
+        min_time_diff_ns = float("inf")
 
-            for tick in reversed(self.tick_data):
-                if not isinstance(tick.timestamp, int):
-                    continue
+        for tick in reversed(self.tick_data):
+            if not isinstance(tick.timestamp, int):
+                continue
 
-                time_diff_ns = abs(tick.timestamp - target_time_ns)
+            time_diff_ns = abs(tick.timestamp - target_time_ns)
 
-                # より良い候補が見つかったら更新
-                if time_diff_ns < min_time_diff_ns:
-                    min_time_diff_ns = time_diff_ns
-                    closest_tick = tick
+            # より良い候補が見つかったら更新
+            if time_diff_ns < min_time_diff_ns:
+                min_time_diff_ns = time_diff_ns
+                closest_tick = tick
 
-                    # 🚀 十分に近い値が見つかったら早期終了
-                    if time_diff_ns < 100_000_000:  # 0.1秒以内なら十分
-                        break
-
-                # 目標時刻を大幅に過ぎたら検索終了
-                if tick.timestamp < target_time_ns - 5_000_000_000:  # 5秒以上古い
+                # 🚀 十分に近い値が見つかったら早期終了
+                if time_diff_ns < 100_000_000:  # 0.1秒以内なら十分
                     break
 
-            return closest_tick.price if closest_tick else None
+            # 目標時刻を大幅に過ぎたら検索終了
+            if tick.timestamp < target_time_ns - 5_000_000_000:  # 5秒以上古い
+                break
+
+        return closest_tick.price if closest_tick else None
 
     def get_latest_price(self) -> Optional[float]:
         """最新価格を取得"""
-        with self._lock:
-            return self.latest_tick.price if self.latest_tick else None
+        return self.latest_tick.price if self.latest_tick else None
 
     def get_price_change_percent(self, n_seconds: int) -> Optional[float]:
         """N秒前からの価格変動率（%）を計算"""
-        print("N秒前からの価格変動率（%）を計算1", flush=True)
-        with self._lock:
-            if not self.latest_tick:
-                print("No latest tick available", flush=True)
-                return None
+        print(f"🔍 N秒前からの価格変動率計算開始 for {self.symbol}, n_seconds={n_seconds}", flush=True)
+        if not self.latest_tick:
+            print(f"🔍 No latest tick available for {self.symbol}", flush=True)
+            return None
 
-            past_price = self.get_price_n_seconds_ago(n_seconds)
-            if past_price is None or past_price == 0:
-                print(
-                    f"No past price available for {n_seconds} seconds ago", flush=True
-                )
-                return None
-
-            current_price = self.latest_tick.price
-            change_percent = ((current_price - past_price) / past_price) * 100.0
-
+        print(f"🔍 Getting price {n_seconds} seconds ago for {self.symbol}...", flush=True)
+        past_price = self.get_price_n_seconds_ago(n_seconds)
+        print(f"🔍 Past price result for {self.symbol}: {past_price}", flush=True)
+        
+        if past_price is None or past_price == 0:
             print(
-                f"Price change for {self.symbol} over {n_seconds} seconds: {change_percent:.2f}% (from {past_price} to {current_price})",
-                flush=True,
+                f"🔍 No past price available for {self.symbol} for {n_seconds} seconds ago", flush=True
             )
-            return change_percent
+            return None
+
+        current_price = self.latest_tick.price
+        change_percent = ((current_price - past_price) / past_price) * 100.0
+
+        print(
+            f"Price change for {self.symbol} over {n_seconds} seconds: {change_percent:.2f}% (from {past_price} to {current_price})",
+            flush=True,
+        )
+        return change_percent
 
     def get_data_count(self) -> int:
         """保持しているデータ数を取得"""
-        with self._lock:
-            return len(self.tick_data)
+        return len(self.tick_data)
 
     def get_time_range(self) -> tuple[Optional[int], Optional[int]]:
         """データの時間範囲を取得（ナノ秒単位のタイムスタンプ）"""
-        with self._lock:
-            if not self.tick_data:
-                return None, None
-            return self.tick_data[0].timestamp, self.tick_data[-1].timestamp
+        if not self.tick_data:
+            return None, None
+        return self.tick_data[0].timestamp, self.tick_data[-1].timestamp
 
     def get_all_ticks(self, limit: Optional[int] = None) -> List[TickData]:
         """全ティックデータを取得（最新からlimit件）"""
-        with self._lock:
-            if limit is None:
-                return list(self.tick_data)
-            else:
-                return list(self.tick_data)[-limit:] if limit > 0 else []
+        if limit is None:
+            return list(self.tick_data)
+        else:
+            return list(self.tick_data)[-limit:] if limit > 0 else []
 
 
 class DataManager:
@@ -216,8 +212,8 @@ class DataManager:
             "last_cleanup": time.time(),  # UNIX秒単位
         }
 
-        # スレッドセーフティ用ロック
-        self._lock = threading.Lock()
+        # シングルプロセス・シングルスレッド環境のためロック不要
+        # self._lock = threading.RLock()  # 削除：マルチプロセス環境でのロック不要
 
         # クリーンアップタイマー
         self._cleanup_timer = None
@@ -239,24 +235,22 @@ class DataManager:
 
     def add_tick(self, tick: TickData):
         """ティックデータを追加"""
-        with self._lock:
-            # 銘柄データが存在しない場合は作成
-            if tick.symbol not in self.symbol_data:
-                self.symbol_data[tick.symbol] = SymbolTickData(
-                    tick.symbol, self.retention_hours
-                )
-                self.stats["active_symbols"] = len(self.symbol_data)
+        # 銘柄データが存在しない場合は作成
+        if tick.symbol not in self.symbol_data:
+            self.symbol_data[tick.symbol] = SymbolTickData(
+                tick.symbol, self.retention_hours
+            )
+            self.stats["active_symbols"] = len(self.symbol_data)
 
-            # ティックデータを追加
-            self.symbol_data[tick.symbol].add_tick(tick)
-            self.stats["total_ticks"] += 1
+        # ティックデータを追加
+        self.symbol_data[tick.symbol].add_tick(tick)
+        self.stats["total_ticks"] += 1
 
     def get_symbol_data(self, symbol: str) -> Optional[SymbolTickData]:
         """特定銘柄のデータ管理オブジェクトを取得"""
         print(f"特定銘柄のデータ管理オブジェクトを取得: {symbol}")
-        with self._lock:
-            print("symbol_data:{self.symbol_data.get(symbol)}")
-            return self.symbol_data.get(symbol)
+        print("symbol_data:{self.symbol_data.get(symbol)}")
+        return self.symbol_data.get(symbol)
 
     def get_price_change_percent(self, symbol: str, n_seconds: int) -> Optional[float]:
         """指定銘柄のN秒前からの価格変動率を取得"""
@@ -271,8 +265,7 @@ class DataManager:
 
     def get_active_symbols(self) -> List[str]:
         """アクティブな銘柄一覧を取得"""
-        with self._lock:
-            return list(self.symbol_data.keys())
+        return list(self.symbol_data.keys())
 
     def get_symbols_with_significant_change(
         self, n_seconds: int, long_threshold: float, short_threshold: float
@@ -290,17 +283,16 @@ class DataManager:
         """
         significant_changes = {}
 
-        with self._lock:
-            for symbol, symbol_data in self.symbol_data.items():
-                change_percent = symbol_data.get_price_change_percent(n_seconds)
+        for symbol, symbol_data in self.symbol_data.items():
+            change_percent = symbol_data.get_price_change_percent(n_seconds)
 
-                if change_percent is not None:
-                    # ロング条件
-                    if change_percent >= long_threshold:
-                        significant_changes[symbol] = change_percent
-                    # ショート条件
-                    elif change_percent <= -short_threshold:
-                        significant_changes[symbol] = change_percent
+            if change_percent is not None:
+                # ロング条件
+                if change_percent >= long_threshold:
+                    significant_changes[symbol] = change_percent
+                # ショート条件
+                elif change_percent <= -short_threshold:
+                    significant_changes[symbol] = change_percent
 
         return significant_changes
 
@@ -312,11 +304,10 @@ class DataManager:
         """
         changes = {}
 
-        with self._lock:
-            for symbol, symbol_data in self.symbol_data.items():
-                change_percent = symbol_data.get_price_change_percent(n_seconds)
-                if change_percent is not None:
-                    changes[symbol] = change_percent
+        for symbol, symbol_data in self.symbol_data.items():
+            change_percent = symbol_data.get_price_change_percent(n_seconds)
+            if change_percent is not None:
+                changes[symbol] = change_percent
 
         return changes
 
@@ -324,24 +315,23 @@ class DataManager:
         """定期的なクリーンアップ処理"""
         logger.debug("Performing periodic data cleanup")
 
-        with self._lock:
-            # 各銘柄のデータをクリーンアップ
-            empty_symbols = []
+        # 各銘柄のデータをクリーンアップ
+        empty_symbols = []
 
-            for symbol, symbol_data in self.symbol_data.items():
-                symbol_data._cleanup_old_data()
+        for symbol, symbol_data in self.symbol_data.items():
+            symbol_data._cleanup_old_data()
 
-                # データが空の銘柄をマーク
-                if symbol_data.get_data_count() == 0:
-                    empty_symbols.append(symbol)
+            # データが空の銘柄をマーク
+            if symbol_data.get_data_count() == 0:
+                empty_symbols.append(symbol)
 
-            # 空の銘柄データを削除
-            for symbol in empty_symbols:
-                del self.symbol_data[symbol]
+        # 空の銘柄データを削除
+        for symbol in empty_symbols:
+            del self.symbol_data[symbol]
 
-            # 統計更新
-            self.stats["active_symbols"] = len(self.symbol_data)
-            self.stats["last_cleanup"] = time.time()
+        # 統計更新
+        self.stats["active_symbols"] = len(self.symbol_data)
+        self.stats["last_cleanup"] = time.time()
 
             logger.debug(
                 f"Cleanup completed. Active symbols: {self.stats['active_symbols']}"
@@ -349,22 +339,21 @@ class DataManager:
 
     def get_stats(self) -> Dict[str, any]:
         """統計情報を取得"""
-        with self._lock:
-            stats = self.stats.copy()
+        stats = self.stats.copy()
 
-            # 各銘柄の詳細統計
-            symbol_stats = {}
-            for symbol, symbol_data in self.symbol_data.items():
-                symbol_stats[symbol] = {
-                    "data_count": symbol_data.get_data_count(),
-                    "latest_price": symbol_data.get_latest_price(),
-                    "time_range": symbol_data.get_time_range(),
-                }
+        # 各銘柄の詳細統計
+        symbol_stats = {}
+        for symbol, symbol_data in self.symbol_data.items():
+            symbol_stats[symbol] = {
+                "data_count": symbol_data.get_data_count(),
+                "latest_price": symbol_data.get_latest_price(),
+                "time_range": symbol_data.get_time_range(),
+            }
 
-            stats["symbols"] = symbol_stats
-            stats["runtime"] = time.time() - stats["start_time"]
+        stats["symbols"] = symbol_stats
+        stats["runtime"] = time.time() - stats["start_time"]
 
-            return stats
+        return stats
 
     def shutdown(self):
         """データマネージャーをシャットダウン"""
@@ -373,8 +362,7 @@ class DataManager:
         if self._cleanup_timer:
             self._cleanup_timer.cancel()
 
-        with self._lock:
-            self.symbol_data.clear()
-            self.stats["active_symbols"] = 0
+        self.symbol_data.clear()
+        self.stats["active_symbols"] = 0
 
         logger.info("✅ データマネージャシャットダウン完了")
