@@ -510,7 +510,7 @@ class TradeMini:
         # print(f"🔍 WORKER: Setting last_heartbeat", flush=True)
         last_heartbeat = time.time()
         # print(f"🔍 WORKER: last_heartbeat = {last_heartbeat}", flush=True)
-        
+
         # 🚨 キュー空状態監視用変数
         last_queue_success_time = time.time()
         consecutive_timeout_duration = 0
@@ -525,6 +525,10 @@ class TradeMini:
 
         # print(f"🔍 WORKER: Entering main loop", flush=True)
         while processing_active.value:
+            # print(
+            #     f"🔍 WORKER: Loop start, processing_active={processing_active.value}",
+            #     flush=True,
+            # )
             try:
                 # 🩸 ハートビート更新（10秒毎）- デッドロック対策
                 current_time = time.time()
@@ -539,7 +543,7 @@ class TradeMini:
                 # キューからデータを取得（タイムアウト付き）- デッドロック回避
                 try:
                     # print(f"💓 Worker attempting queue.get", flush=True)
-                    batch_data = data_queue.get(timeout=1.0)
+                    batch_data = data_queue.get(timeout=0.0001)
                     # print(
                     #     f"💓 Worker got batch data: {len(batch_data.get('tickers', []))} tickers",
                     #     flush=True,
@@ -554,10 +558,15 @@ class TradeMini:
                 except Exception as e:
                     # 🚨 タイムアウト監視ロジック
                     current_time = time.time()
-                    consecutive_timeout_duration = current_time - last_queue_success_time
-                    
+                    consecutive_timeout_duration = (
+                        current_time - last_queue_success_time
+                    )
+
                     if consecutive_timeout_duration >= timeout_warning_threshold:
-                        print(f"⚠️ ALERT: Worker queue empty for {consecutive_timeout_duration:.1f}s - Potential worker stall!", flush=True)
+                        print(
+                            f"⚠️ ALERT: Worker queue empty for {consecutive_timeout_duration:.1f}s - Potential worker stall!",
+                            flush=True,
+                        )
                     # else:
                     #     # 10秒未満のタイムアウトは正常状態（ログ出力なし）
                     #     pass
