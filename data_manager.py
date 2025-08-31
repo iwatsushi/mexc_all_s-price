@@ -49,9 +49,9 @@ class SymbolTickData:
 
     def add_tick(self, tick: TickData):
         """ティックデータを追加（高速化版）"""
-        print(
-            f"ティックデータを追加 {tick.symbol} at {tick.timestamp} with price {tick.price}"
-        )
+        # print(
+        #     f"ティックデータを追加 {tick.symbol} at {tick.timestamp} with price {tick.price}"
+        # )
         # 重複データのチェック（高速化）
         if tick.timestamp in self.timestamp_index:
             # 価格が更新された場合のみ処理
@@ -70,15 +70,9 @@ class SymbolTickData:
         self.stats["total_ticks"] += 1
 
         # 統計更新（高速化）
-        if (
-            not self.stats["oldest_tick"]
-            or tick.timestamp < self.stats["oldest_tick"]
-        ):
+        if not self.stats["oldest_tick"] or tick.timestamp < self.stats["oldest_tick"]:
             self.stats["oldest_tick"] = tick.timestamp
-        if (
-            not self.stats["newest_tick"]
-            or tick.timestamp > self.stats["newest_tick"]
-        ):
+        if not self.stats["newest_tick"] or tick.timestamp > self.stats["newest_tick"]:
             self.stats["newest_tick"] = tick.timestamp
 
         # 🚀 クリーンアップ頻度制御（5分に1回のみ）
@@ -115,9 +109,7 @@ class SymbolTickData:
             return None
 
         try:
-            target_time_ns = self.latest_tick.timestamp - (
-                n_seconds * 1_000_000_000
-            )
+            target_time_ns = self.latest_tick.timestamp - (n_seconds * 1_000_000_000)
         except (TypeError, AttributeError):
             return None
 
@@ -152,28 +144,34 @@ class SymbolTickData:
 
     def get_price_change_percent(self, n_seconds: int) -> Optional[float]:
         """N秒前からの価格変動率（%）を計算"""
-        print(f"🔍 N秒前からの価格変動率計算開始 for {self.symbol}, n_seconds={n_seconds}", flush=True)
+        # print(
+        #     # f"🔍 N秒前からの価格変動率計算開始 for {self.symbol}, n_seconds={n_seconds}",
+        #     flush=True,
+        # )
         if not self.latest_tick:
-            print(f"🔍 No latest tick available for {self.symbol}", flush=True)
+            # print(f"🔍 No latest tick available for {self.symbol}", flush=True)
             return None
 
-        print(f"🔍 Getting price {n_seconds} seconds ago for {self.symbol}...", flush=True)
+        # print(
+        #     f"🔍 Getting price {n_seconds} seconds ago for {self.symbol}...", flush=True
+        # )
         past_price = self.get_price_n_seconds_ago(n_seconds)
-        print(f"🔍 Past price result for {self.symbol}: {past_price}", flush=True)
-        
+        # print(f"🔍 Past price result for {self.symbol}: {past_price}", flush=True)
+
         if past_price is None or past_price == 0:
-            print(
-                f"🔍 No past price available for {self.symbol} for {n_seconds} seconds ago", flush=True
-            )
+            # print(
+            #     f"🔍 No past price available for {self.symbol} for {n_seconds} seconds ago",
+            #     flush=True,
+            # )
             return None
 
         current_price = self.latest_tick.price
         change_percent = ((current_price - past_price) / past_price) * 100.0
 
-        print(
-            f"Price change for {self.symbol} over {n_seconds} seconds: {change_percent:.2f}% (from {past_price} to {current_price})",
-            flush=True,
-        )
+        # print(
+        #     f"Price change for {self.symbol} over {n_seconds} seconds: {change_percent:.2f}% (from {past_price} to {current_price})",
+        #     flush=True,
+        # )
         return change_percent
 
     def get_data_count(self) -> int:
@@ -248,13 +246,13 @@ class DataManager:
 
     def get_symbol_data(self, symbol: str) -> Optional[SymbolTickData]:
         """特定銘柄のデータ管理オブジェクトを取得"""
-        print(f"特定銘柄のデータ管理オブジェクトを取得: {symbol}")
-        print("symbol_data:{self.symbol_data.get(symbol)}")
+        # print(f"特定銘柄のデータ管理オブジェクトを取得: {symbol}")
+        # print("symbol_data:{self.symbol_data.get(symbol)}")
         return self.symbol_data.get(symbol)
 
     def get_price_change_percent(self, symbol: str, n_seconds: int) -> Optional[float]:
         """指定銘柄のN秒前からの価格変動率を取得"""
-        print("指定銘柄のN秒前からの価格変動率を取得2", flush=True)
+        # print("指定銘柄のN秒前からの価格変動率を取得2", flush=True)
         symbol_data = self.get_symbol_data(symbol)
         return symbol_data.get_price_change_percent(n_seconds) if symbol_data else None
 
@@ -333,7 +331,9 @@ class DataManager:
         self.stats["active_symbols"] = len(self.symbol_data)
         self.stats["last_cleanup"] = time.time()
 
-        logger.debug("Cleanup completed. Active symbols: %d", self.stats['active_symbols'])
+        logger.debug(
+            "Cleanup completed. Active symbols: %d", self.stats["active_symbols"]
+        )
 
     def get_stats(self) -> Dict[str, any]:
         """統計情報を取得"""

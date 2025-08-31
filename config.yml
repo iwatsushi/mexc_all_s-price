@@ -45,13 +45,13 @@ strategy:
     price_comparison_seconds: 10 # 5 一時的に上昇
 
     # 上昇トリガー閾値（X%）- テスト用に非常に小さく設定
-    long_threshold_percent: 0.001 # 0.001% 非常に小さく調整（テスト用）
+    long_threshold_percent: 0.5 # 0.001% 非常に小さく調整（テスト用）
 
     # 下落トリガー閾値（Y%）- テスト用に非常に小さく設定
-    short_threshold_percent: 0.001 # 0.001% 非常に小さく調整（テスト用）
+    short_threshold_percent: 0.5 # 0.001% 非常に小さく調整（テスト用）
 
     # 利確判定の反発閾値（Z%）- トレンドフォロー戦略
-    reversal_threshold_percent: 0.0015 # 1.5 一時的に下降
+    reversal_threshold_percent: 0.015 # 1.5 一時的に下降
 
     # 最小利益率（M%）- 効率的な利確
     min_profit_percent: 0.005 # 0.8 上昇

@@ -145,7 +145,7 @@ class TradingStrategy:
             if close_signal.signal_type != SignalType.NONE:
                 return close_signal
 
-        # 新規エントリーシグナルをチェック
+            # 新規エントリーシグナルをチェック
             return self._check_entry_signal(tick)
 
     def _check_entry_signal(self, tick: TickData) -> TradingSignal:
@@ -345,10 +345,10 @@ class TradingStrategy:
         )
 
         self.position_trackers[symbol] = tracker
-            self.stats["active_positions"] = len(self.position_trackers)
-            self.stats["total_positions_tracked"] += 1
+        self.stats["active_positions"] = len(self.position_trackers)
+        self.stats["total_positions_tracked"] += 1
 
-            logger.info(f"ポジション追跡開始: {symbol} {side} @ {entry_price}")
+        logger.info(f"ポジション追跡開始: {symbol} {side} @ {entry_price}")
 
     def remove_position(self, symbol: str) -> Optional[PositionTracker]:
         """
@@ -413,10 +413,10 @@ class TradingStrategy:
                     "entry_price": tracker.entry_price,
                     "max_profit": tracker.max_profit_percent,
                     "updates": tracker.price_updates,
-                    }
-                    for symbol, tracker in self.position_trackers.items()
-                },
-            }
+                }
+                for symbol, tracker in self.position_trackers.items()
+            },
+        }
 
     def get_price_change_percent(self, symbol: str) -> float:
         print(f"Retrieving price change percent for {symbol}", flush=True)
@@ -477,32 +477,20 @@ class TradingStrategy:
                 logger.debug(f"Failed to get portfolio summary: {e}")
                 portfolio = {}
 
-            logger.info("\n=== TRADE MINI 統計情報 ===")
-            logger.info(f"⏰ 稼働時間: {uptime/3600:.2f}時間")
-            logger.info(f"📊 ティック処理数: {main_stats.get('ticks_processed', 0):,}")
             logger.info(
-                f"📡 シグナル生成数: {strategy_stats.get('signals_generated', 0)}"
+                "\n=== TRADE MINI 統計情報 ===\n"
+                f"⏰ 稼働時間: {uptime/3600:.2f}時間\n"
+                f"📊 ティック処理数: {main_stats.get('ticks_processed', 0):,}\n"
+                f"📡 シグナル生成数: {strategy_stats.get('signals_generated', 0)}\n"
+                f"💼 実行取引数: {main_stats.get('trades_executed', 0)}\n"
+                f"💎 アクティブ銘柄数: {data_stats.get('active_symbols', 0)}\n"
+                f"🔥 オープンポジション: {position_stats.get('current_positions', 0)}\n"
+                f"🏦 アカウント残高: {portfolio.get('account_balance', 0):.2f} USDT\n"
+                f"📈 未実現損益: {portfolio.get('total_unrealized_pnl', 0):.2f} USDT\n"
+                f"💾 QuestDB保存ティック数: {questdb_stats.get('ticks_saved', 0):,}\n"
+                f"🔄 Bybit取引可能銘柄数: {symbol_stats.get('total_tradeable_symbols', 0)}\n"
+                "============================="
             )
-            logger.info(f"🚀 実行取引数: {main_stats.get('trades_executed', 0)}")
-
-            logger.info(f"💎 アクティブ銘柄数: {data_stats.get('active_symbols', 0)}")
-            logger.info(
-                f"🔥 オープンポジション: {position_stats.get('current_positions', 0)}"
-            )
-            logger.info(
-                f"🏦 アカウント残高: {portfolio.get('account_balance', 0):.2f} USDT"
-            )
-            logger.info(
-                f"📈 未実現損益: {portfolio.get('total_unrealized_pnl', 0):.2f} USDT"
-            )
-
-            logger.info(
-                f"💾 QuestDB保存ティック数: {questdb_stats.get('ticks_saved', 0):,}"
-            )
-            logger.info(
-                f"🔄 Bybit取引可能銘柄数: {symbol_stats.get('total_tradeable_symbols', 0)}"
-            )
-            logger.info("=============================\n")
 
         except Exception as e:
             logger.error(f"統計情報ログ出力エラー: {e}")
@@ -519,10 +507,10 @@ class TradingStrategy:
         - 不要な計算のスキップ
         - 軽量ポジショントラッキング
         """
-        print(
-            f"🔍 Analyzing tick optimized for {tick.symbol} at {tick.timestamp}",
-            flush=True,
-        )
+        # print(
+        #     f"🔍 Analyzing tick optimized for {tick.symbol} at {tick.timestamp}",
+        #     flush=True,
+        # )
         # 🚀 ロック外での事前チェック（ロック競合回避）
         has_position = tick.symbol in self.position_trackers
 
@@ -532,10 +520,10 @@ class TradingStrategy:
             return self._analyze_existing_position(tick)
         else:
             # 新規エントリー候補の超高速分析
-            print(
-                f"✨ No existing position for {tick.symbol}, analyzing for entry",
-                flush=True,
-            )
+            # print(
+            #     f"✨ No existing position for {tick.symbol}, analyzing for entry",
+            #     flush=True,
+            # )
             return self._analyze_new_entry_fast(tick)
 
     def _analyze_existing_position(self, tick: TickData) -> TradingSignal:
@@ -550,31 +538,31 @@ class TradingStrategy:
 
     def _analyze_new_entry_fast(self, tick: TickData) -> TradingSignal:
         """新規エントリーの超高速分析 (キャッシュ最適化)"""
-        print(f"🚀 Fast entry analysis for {tick.symbol}", flush=True)
+        # print(f"🚀 Fast entry analysis for {tick.symbol}", flush=True)
         # 価格変動率を高速取得（キャッシュ利用）
-        print("価格変動率を高速取得（キャッシュ利用）", flush=True)
-        print(self.data_manager, flush=True)
+        # print("価格変動率を高速取得（キャッシュ利用）", flush=True)
+        # print(self.data_manager, flush=True)
         change_percent = self.data_manager.get_price_change_percent(
             tick.symbol, self.price_comparison_seconds
         )
-        print(
-            f"📈 Price change for {tick.symbol}: {change_percent}%",
-            flush=True,
-        )
+        # print(
+        #     f"📈 Price change for {tick.symbol}: {change_percent}%",
+        #     flush=True,
+        # )
 
         if change_percent is None:
-            print(f"❌ No price change data for {tick.symbol}", flush=True)
+            # print(f"❌ No price change data for {tick.symbol}", flush=True)
             return self._create_no_signal(tick)
 
         # 🚀 閾値チェックを最適化（早期リターン）
         if change_percent >= self.long_threshold:
-            print(f"📊 Long signal generated for {tick.symbol}", flush=True)
+            # print(f"📊 Long signal generated for {tick.symbol}", flush=True)
             return self._create_signal(tick, SignalType.LONG, change_percent)
         elif change_percent <= -self.short_threshold:
-            print(f"📊 Short signal generated for {tick.symbol}", flush=True)
+            # print(f"📊 Short signal generated for {tick.symbol}", flush=True)
             return self._create_signal(tick, SignalType.SHORT, change_percent)
         else:
-            print(f"ℹ️ No entry signal for {tick.symbol}", flush=True)
+            # print(f"ℹ️ No entry signal for {tick.symbol}", flush=True)
             return self._create_no_signal(tick)
 
     def _create_no_signal(self, tick: TickData) -> TradingSignal:
@@ -621,10 +609,10 @@ class TradingStrategy:
         Returns:
             取引が実行されたかどうか
         """
-        print(
-            f"🔍 Processing tick for {tick.symbol} at {tick.timestamp} with price {tick.price}",
-            flush=True,
-        )
+        # print(
+        #     f"🔍 Processing tick for {tick.symbol} at {tick.timestamp} with price {tick.price}",
+        #     flush=True,
+        # )
         try:
             # 🚀 高速化: 軽量チェック（全銘柄処理）
             if not self._should_process_tick(tick):
@@ -635,13 +623,13 @@ class TradingStrategy:
             signal = self.analyze_tick_optimized(tick)
 
             if signal.signal_type == SignalType.NONE:
-                print(f"ℹ️ No trade signal for {tick.symbol}", flush=True)
+                # print(f"ℹ️ No trade signal for {tick.symbol}", flush=True)
                 return False
 
             # シグナルに基づいて取引実行
-            print(
-                f"🚀 Trade signal for {tick.symbol}: {signal.signal_type}", flush=True
-            )
+            # print(
+            #     f"🚀 Trade signal for {tick.symbol}: {signal.signal_type}", flush=True
+            # )
             return self._execute_trade_from_signal(signal)
 
         except Exception as e:
@@ -682,7 +670,7 @@ class TradingStrategy:
     def _execute_long_position(self, signal: TradingSignal) -> bool:
         """ロングポジションを開く"""
         try:
-            logger.info(f"🔥 ロング闾値達成: {signal.symbol} 変動={signal.reason}")
+            logger.info(f"⬆️ ロング闾値達成: {signal.symbol} 変動={signal.reason}")
 
             if self.position_manager is None:
                 logger.warning(
@@ -719,7 +707,7 @@ class TradingStrategy:
     def _execute_short_position(self, signal: TradingSignal) -> bool:
         """ショートポジションを開く"""
         try:
-            logger.info(f"🔥 ショート闾値達成: {signal.symbol} 変動={signal.reason}")
+            logger.info(f"⬇️ ショート闾値達成: {signal.symbol} 変動={signal.reason}")
 
             if self.position_manager is None:
                 logger.warning(
@@ -805,9 +793,12 @@ class TradingStrategy:
         Returns:
             処理統計 {"processed_count": int, "signals_count": int, "trades_executed": int}
         """
-        print(f"🔍 ENTERED process_ticker_batch: batch_id={batch_id}, tickers_count={len(tickers)}", flush=True)
+        # print(
+        #     f"🔍 ENTERED process_ticker_batch: batch_id={batch_id}, tickers_count={len(tickers)}",
+        #     flush=True,
+        # )
         logger.info(f"🚀 戦略バッチ#{batch_id}処理開始: {len(tickers)}ティッカー")
-        print(f"🔍 Logger.info completed", flush=True)
+        # print("🔍 Logger.info completed", flush=True)
         start_time = time.time()
         processed_count = 0
         signals_count = 0
@@ -822,32 +813,32 @@ class TradingStrategy:
         trading_time = 0
 
         # 🚀 全銘柄処理ループ（制限解除）
-        logger.info(f"🔄 バッチ#{batch_id}: {len(tickers)}銘柄の処理ループ開始")
+        # logger.info(f"🔄 バッチ#{batch_id}: {len(tickers)}銘柄の処理ループ開始")
 
         # 即座にハートビート更新
         if worker_heartbeat is not None:
             try:
-                print("💓 ハートビート更新")
+                # print("💓 ハートビート更新")
                 worker_heartbeat.value = time.time()
             except Exception as e:
                 logger.warning(f"❌ ハートビート更新失敗: {e}")
 
         # 🚀 全銘柄を処理（制限なし）
-        logger.info("🚀 全銘柄を処理（制限なし）")
+        # logger.info("🚀 全銘柄を処理（制限なし）")
         for i, ticker_data in enumerate(tickers):
-            print(f"🔍 START ticker {i+1}/{len(tickers)}", flush=True)
+            # print(f"🔍 START ticker {i+1}/{len(tickers)}", flush=True)
             try:
                 symbol = (
                     ticker_data.get("symbol", "N/A")
-                    if isinstance(ticker_data, dict)
-                    else "NOT_DICT"
+                    # if isinstance(ticker_data, dict)
+                    # else "NOT_DICT"
                 )
-                print(f"🔍 Symbol: {symbol}", flush=True)
-                logger.info(f"Processing ticker {i+1}/{len(tickers)}: {symbol}")
-                print(
-                    f"🔍 ticker_data keys: {list(ticker_data.keys()) if isinstance(ticker_data, dict) else 'NOT_DICT'}",
-                    flush=True,
-                )
+                # print(f"🔍 Symbol: {symbol}", flush=True)
+                # logger.info(f"Processing ticker {i+1}/{len(tickers)}: {symbol}")
+                # print(
+                #     f"🔍 ticker_data keys: {list(ticker_data.keys()) if isinstance(ticker_data, dict) else 'NOT_DICT'}",
+                #     flush=True,
+                # )
             except Exception as e:
                 print(f"🔍 ERROR getting symbol: {e}", flush=True)
                 continue
@@ -855,58 +846,71 @@ class TradingStrategy:
                 # データ処理開始時間
                 data_start = time.time()
 
-                if not isinstance(ticker_data, dict):
-                    print(f"❌ 無効なティッカーデータ形式: {ticker_data}")
-                    continue
+                # if not isinstance(ticker_data, dict):
+                #     print(f"❌ 無効なティッカーデータ形式: {ticker_data}")
+                #     continue
 
                 symbol = ticker_data.get("symbol", "")
-                if not symbol:
-                    print(f"❌ 無効なシンボル: {ticker_data}")
-                    continue
+                # if not symbol:
+                #     print(f"❌ 無効なシンボル: {ticker_data}")
+                #     continue
 
                 # 本来のTickData作成（実際の価格データを使用）
                 try:
-                    print(f"🔍 About to get price for {symbol}...", flush=True)
+                    # print(f"🔍 About to get price for {symbol}...", flush=True)
                     price = float(ticker_data.get("lastPrice", 0))
-                    print(f"🔍 Price for {symbol}: {price}", flush=True)
-                    print(f"🔍 About to get volume for {symbol}...", flush=True)
-                    volume = float(ticker_data.get("volume", 0))
-                    print(f"🔍 Volume for {symbol}: {volume}", flush=True)
-
                     if price <= 0:
-                        print(f"❌ 0な価格データ: {ticker_data}")
-                        continue
+                        price = float(ticker_data.get("indexPrice", 0))
+                        if price <= 0:
+                            price = float(ticker_data.get("fairPrice", 0))
+                            if price <= 0:
+                                print(f"❌ 0な価格データ: {symbol} {ticker_data}")
+                                continue
+                    # print(f"🔍 Price for {symbol}: {price}", flush=True)
 
-                    print(f"🔍 Price/Volume check passed for {symbol}: price={price}, volume={volume}", flush=True)
-                    print(f"🔍 Creating TickData for {symbol}...", flush=True)
+                    # print(f"🔍 About to get volume for {symbol}...", flush=True)
+                    volume = float(ticker_data.get("volume", 0))
+                    # print(f"🔍 Volume for {symbol}: {volume}", flush=True)
+
+                    # print(
+                    #     f"🔍 Price/Volume check passed for {symbol}: price={price}, volume={volume}",
+                    #     flush=True,
+                    # )
+                    # print(f"🔍 Creating TickData for {symbol}...", flush=True)
                     tick = TickData(
                         symbol=symbol,
                         price=price,
                         volume=volume,
                         timestamp=batch_ts_ns,
                     )
-                    print(f"🔍 TickData created: {tick}", flush=True)
+                    # print(f"🔍 TickData created: {tick}", flush=True)
 
                     # DataManager.add_tick を呼び出し
-                    print(f"🔍 About to check data_manager: {self.data_manager is not None}", flush=True)
-                    if self.data_manager is not None:
-                        print("🔍 Adding tick to DataManager...", flush=True)
-                        print(f"🔍 DataManager type: {type(self.data_manager)}", flush=True)
-                        try:
-                            self.data_manager.add_tick(tick)
-                            print("🔍 DataManager.add_tick completed", flush=True)
-                        except Exception as e:
-                            print(f"🔍 DataManager.add_tick ERROR: {e}", flush=True)
-                            raise
-                    else:
-                        print("🔍 DataManager is None!", flush=True)
+                    # print(
+                    #     f"🔍 About to check data_manager: {self.data_manager is not None}",
+                    #     flush=True,
+                    # )
+                    # if self.data_manager is not None:
+                    # print("🔍 Adding tick to DataManager...", flush=True)
+                    # print(
+                    #     f"🔍 DataManager type: {type(self.data_manager)}",
+                    #     flush=True,
+                    # )
+                    try:
+                        self.data_manager.add_tick(tick)
+                        # print("🔍 DataManager.add_tick completed", flush=True)
+                    except Exception as e:
+                        logger.error(f"🔍 DataManager.add_tick ERROR: {e}")
+                        raise
+                    # else:
+                    #     print("🔍 DataManager is None!", flush=True)
 
                     # データ処理時間測定
                     data_processing_time += time.time() - data_start
 
                     # 🚀 戦略分析と取引実行
                     analysis_start = time.time()
-                    print("🚀 戦略分析と取引実行")
+                    # print("🚀 戦略分析と取引実行")
                     trade_executed = self.process_tick_and_execute_trades(tick)
                     analysis_time += time.time() - analysis_start
 
@@ -916,14 +920,14 @@ class TradingStrategy:
                         trades_executed += 1
 
                     # 100銘柄毎にハートビート更新でタイムアウト防止
-                    if processed_count % 100 == 0 and worker_heartbeat is not None:
-                        try:
-                            worker_heartbeat.value = time.time()
-                        except Exception:
-                            pass
+                    if processed_count % 100 == 0:  # and worker_heartbeat is not None:
+                        # try:
+                        worker_heartbeat.value = time.time()
+                        # except Exception:
+                        # pass
 
                 except (ValueError, TypeError) as e:
-                    logger.debug(f"価格データ変換エラー {symbol}: {e}")
+                    logger.error(f"価格データ変換エラー {symbol}: {e}")
                     continue
 
             except Exception as e:
@@ -931,17 +935,17 @@ class TradingStrategy:
                 continue
 
         # 定期的なハートビート更新（処理中）
-        if worker_heartbeat is not None:
-            try:
-                worker_heartbeat.value = time.time()
-            except Exception:
-                pass
+        # if worker_heartbeat is not None:
+        #     try:
+        #         worker_heartbeat.value = time.time()
+        #     except Exception:
+        #         pass
 
         duration = time.time() - start_time
 
         # 💓 処理完了時のハートビート更新 - 一時的に無効化
-        if False and worker_heartbeat is not None:
-            worker_heartbeat.value = time.time()
+        # if False and worker_heartbeat is not None:
+        worker_heartbeat.value = time.time()
 
         # 📊 詳細タイミングログ
         avg_time_per_ticker = duration / len(tickers) * 1000 if len(tickers) > 0 else 0
@@ -953,11 +957,11 @@ class TradingStrategy:
 
         # 🔍 詳細パフォーマンス分析（ワーカー=1での計測用）
         tickers_per_second = len(tickers) / duration if duration > 0 else 0
-        logger.info(
-            f"🚀 PERFORMANCE METRICS - Batch #{batch_id}: "
-            f"処理速度={tickers_per_second:.1f}銘柄/秒, "
-            f"総時間={duration:.3f}s, 平均={avg_time_per_ticker:.2f}ms/銘柄"
-        )
+        # logger.info(
+        #     f"🚀 PERFORMANCE METRICS - Batch #{batch_id}: "
+        #     f"処理速度={tickers_per_second:.1f}銘柄/秒, "
+        #     f"総時間={duration:.3f}s, 平均={avg_time_per_ticker:.2f}ms/銘柄"
+        # )
 
         # 🔬 詳細ステップ別時間分析
         logger.info(

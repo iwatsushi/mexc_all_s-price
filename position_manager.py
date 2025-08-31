@@ -148,9 +148,9 @@ class PositionManager:
                         if self.account_balance > 0:
                             break
 
-                    logger.info(
-                        f"🏦 Bybitアカウント残高更新: {self.account_balance} USDT"
-                    )
+                    # logger.info(
+                    #     f"🏦 Bybitアカウント残高更新: {self.account_balance} USDT"
+                    # )
                 else:
                     logger.error(f"Bybit残高取得失敗: {balance_response.get('retMsg')}")
 

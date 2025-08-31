@@ -120,7 +120,7 @@ class SymbolMapper:
             return True
 
         try:
-            logger.info("🔄 Bybitから銘柄マッピングを更新中...")
+            # logger.info("🔄 Bybitから銘柄マッピングを更新中...")
 
             # Bybitから取引可能銘柄一覧を取得
             available_symbols = self.bybit_client.get_available_symbols()
@@ -143,11 +143,11 @@ class SymbolMapper:
             self._last_update = current_time
 
             logger.info(
-                f"銘柄マッピング更新完了: {len(self.tradeable_mexc_symbols)}個の取引可能銘柄"
+                f"🔄 Bybitから銘柄マッピングを更新完了: {len(self.tradeable_mexc_symbols)}個の取引可能銘柄"
             )
-            logger.debug(
-                f"Sample symbols: {list(self.tradeable_mexc_symbols)[:10]}"
-            )
+            # logger.debug(
+            #     f"Sample symbols: {list(self.tradeable_mexc_symbols)[:10]}"
+            # )
 
             return True
 
@@ -280,9 +280,7 @@ class SymbolMapper:
             Bybitで取引可能なシンボルのみのリスト
         """
         return [
-            symbol
-            for symbol in mexc_symbols
-            if symbol in self.tradeable_mexc_symbols
+            symbol for symbol in mexc_symbols if symbol in self.tradeable_mexc_symbols
         ]
 
     def get_mapping_stats(self) -> Dict[str, any]:
@@ -701,12 +699,12 @@ class SymbolMapper:
             "total_ready_for_recheck": failed_ready_for_recheck
             + mexc_ready_for_recheck,
             "recheck_interval_hours": self._recheck_interval / 3600,
-            "sample_failed_symbols": list(
-                self.symbol_status["failed_mapping"].keys()
-            )[:5],
-            "sample_mexc_exclusive": list(
-                self.symbol_status["mexc_exclusive"].keys()
-            )[:5],
+            "sample_failed_symbols": list(self.symbol_status["failed_mapping"].keys())[
+                :5
+            ],
+            "sample_mexc_exclusive": list(self.symbol_status["mexc_exclusive"].keys())[
+                :5
+            ],
         }
 
     def manual_recheck_symbol(self, mexc_symbol: str) -> bool:
