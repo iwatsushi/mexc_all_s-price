@@ -235,7 +235,7 @@ class SymbolMapper:
 
     def is_tradeable_on_bybit(self, mexc_symbol: str) -> bool:
         """
-        指定されたMEXC銘柄がBybitで取引可能かチェック
+        指定されたMEXC銘柄がBybitで取引可能かチェック（変換処理付き）
 
         Args:
             mexc_symbol: MEXCシンボル（例：BTC_USDT）
@@ -247,7 +247,28 @@ class SymbolMapper:
         if time.time() - self._last_update > self._update_interval:
             threading.Thread(target=self.update_symbol_mapping, daemon=True).start()
 
-        return mexc_symbol in self.tradeable_mexc_symbols
+        # まずキャッシュから確認
+        if mexc_symbol in self.tradeable_mexc_symbols:
+            return True
+        
+        # キャッシュにない場合は、Bybit形式に変換して確認
+        bybit_symbol = self._convert_mexc_to_bybit(mexc_symbol)
+        
+        # Bybitクライアントで実際に取引可能かチェック
+        logger.info(f"🔍 Bybitで銘柄を確認中: {mexc_symbol} -> {bybit_symbol}")
+        try:
+            if self.bybit_client.check_symbol_availability(bybit_symbol):
+                # 取引可能な場合はキャッシュに追加
+                self.mexc_to_bybit[mexc_symbol] = bybit_symbol
+                self.tradeable_mexc_symbols.add(mexc_symbol)
+                logger.info(f"✅ 新しい銘柄マッピングを発見: {mexc_symbol} -> {bybit_symbol}")
+                return True
+            else:
+                logger.info(f"❌ Bybitで取引不可: {mexc_symbol} -> {bybit_symbol}")
+        except Exception as e:
+            logger.error(f"銘柄可用性確認エラー {mexc_symbol} -> {bybit_symbol}: {e}")
+        
+        return False
 
     def get_bybit_symbol(self, mexc_symbol: str) -> str:
         """
@@ -259,7 +280,17 @@ class SymbolMapper:
         Returns:
             対応するBybitシンボル（存在しない場合は空文字）
         """
-        return self.mexc_to_bybit.get(mexc_symbol, "")
+        # キャッシュから確認
+        if mexc_symbol in self.mexc_to_bybit:
+            return self.mexc_to_bybit[mexc_symbol]
+        
+        # キャッシュにない場合は変換を試行
+        if self.is_tradeable_on_bybit(mexc_symbol):
+            # is_tradeable_on_bybitでキャッシュに追加されるはず
+            return self.mexc_to_bybit.get(mexc_symbol, "")
+        
+        # 取引可能でない場合でも、変換だけは試行
+        return self._convert_mexc_to_bybit(mexc_symbol)
 
     def get_tradeable_symbols(self) -> List[str]:
         """Bybitで取引可能な銘柄一覧を取得（MEXC形式）"""

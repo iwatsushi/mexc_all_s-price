@@ -184,16 +184,15 @@ class BybitClient:
             return f"{base}_USDT"
         return bybit_symbol
 
-    def check_symbol_availability(self, mexc_symbol: str) -> bool:
-        """シンボルがBybitで取引可能かチェック"""
-        bybit_symbol = self._convert_mexc_to_bybit_symbol(mexc_symbol)
-
+    def check_symbol_availability(self, symbol: str) -> bool:
+        """シンボルがBybitで取引可能かチェック（既にBybit形式と想定）"""
         try:
             response = self._send_request(
                 "GET",
                 "/v5/market/instruments-info",
-                {"category": "linear", "symbol": bybit_symbol},
+                {"category": "linear", "symbol": symbol},
             )
+            print(response, flush=True)
 
             if response.get("retCode") == 0:
                 instruments = response.get("result", {}).get("list", [])
@@ -203,21 +202,20 @@ class BybitClient:
 
             return False
         except Exception as e:
-            logger.error(f"{mexc_symbol}の銘柄利用可能性チェックエラー: {e}")
+            logger.error(f"{symbol}の銘柄利用可能性チェックエラー: {e}")
             return False
 
     def place_market_order(
-        self, mexc_symbol: str, side: str, qty: float
+        self, symbol: str, side: str, qty: float
     ) -> BybitOrderResult:
         """
         成行注文を発注
 
         Args:
-            mexc_symbol: MEXCシンボル（例：BTC_USDT）
+            symbol: Bybitシンボル（例：BTCUSDT）
             side: "LONG" or "SHORT"
             qty: 注文量（USDT）
         """
-        bybit_symbol = self._convert_mexc_to_bybit_symbol(mexc_symbol)
 
         # サイド変換
         bybit_side = "Buy" if side == "LONG" else "Sell"
@@ -227,7 +225,7 @@ class BybitClient:
 
         params = {
             "category": "linear",
-            "symbol": bybit_symbol,
+            "symbol": symbol,
             "side": bybit_side,
             "orderType": "Market",
             "qty": str(qty),
@@ -317,19 +315,17 @@ class BybitClient:
                 success=False, message=response.get("retMsg", "Unknown error")
             )
 
-    def set_leverage(self, mexc_symbol: str, leverage: float) -> bool:
+    def set_leverage(self, symbol: str, leverage: float) -> bool:
         """
         レバレッジを設定
 
         Args:
-            mexc_symbol: MEXCシンボル
+            symbol: Bybitシンボル
             leverage: レバレッジ倍率
         """
-        bybit_symbol = self._convert_mexc_to_bybit_symbol(mexc_symbol)
-
         params = {
             "category": "linear",
-            "symbol": bybit_symbol,
+            "symbol": symbol,
             "buyLeverage": str(leverage),
             "sellLeverage": str(leverage),
         }
@@ -340,9 +336,7 @@ class BybitClient:
             logger.info(f"{mexc_symbol}のレバレッジを{leverage}倍に設定")
             return True
         else:
-            logger.error(
-                f"{mexc_symbol}のレバレッジ設定失敗: {response.get('retMsg')}"
-            )
+            logger.error(f"{mexc_symbol}のレバレッジ設定失敗: {response.get('retMsg')}")
             return False
 
     def get_symbol_info(self, mexc_symbol: str) -> Dict[str, Any]:

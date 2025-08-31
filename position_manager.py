@@ -320,15 +320,20 @@ class PositionManager:
         margin_mode = self._determine_margin_mode()
 
         if self.trading_exchange == "bybit":
+            # MEXC銘柄をBybit銘柄に変換
+            bybit_symbol = self.symbol_mapper.get_bybit_symbol(symbol)
+            if not bybit_symbol:
+                return False, f"Cannot convert {symbol} to Bybit format", None
+            
             # Bybitでレバレッジ設定
-            leverage_success = self.bybit_client.set_leverage(symbol, leverage)
+            leverage_success = self.bybit_client.set_leverage(bybit_symbol, leverage)
             if leverage_success:
                 self.stats["margin_mode_switches"] += 1
-                logger.info(f"Set leverage for {symbol} to {leverage}x on Bybit")
+                logger.info(f"Set leverage for {bybit_symbol} ({symbol}) to {leverage}x on Bybit")
 
             # 注文実行（Bybit）
             order_result = self.bybit_client.place_market_order(
-                symbol, side, position_size
+                bybit_symbol, side, position_size
             )
             order_success = order_result.success
             order_id = order_result.order_id
