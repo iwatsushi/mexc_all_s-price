@@ -36,8 +36,8 @@ from symbol_mapper import SymbolMapper
 class TradeMini:
     """Trade Mini メインアプリケーション"""
 
-    # 🔒 クラス変数：バッチ処理の同期制御
-    _mp_batch_processing = False  # マルチプロセス用バッチ処理フラグ
+    # 🔒 クラス変数：バッチ処理の同期制御（削除：マルチプロセス環境では無効）
+    # _mp_batch_processing = False  # マルチプロセス用バッチ処理フラグ
 
     def __init__(self, config_path: str = "config.yml"):
         """
@@ -454,7 +454,7 @@ class TradeMini:
 
     def _start_multiprocess_data_worker(self):
         """マルチプロセスデータ処理ワーカーを開始"""
-        logger.info("🚀 マルチプロセスデータワーカー開始 (真のプロセス分離)")
+        # logger.info("🚀 マルチプロセスデータワーカー開始 (真のプロセス分離)")
 
         # print("🔍 MAIN: Creating Process object", flush=True)
         # 独立プロセスでデータ処理を実行
@@ -548,36 +548,15 @@ class TradeMini:
                 batch_timestamp = batch_data["timestamp"]
                 batch_id = batch_data["batch_id"]
 
-                # 🔒 バッチ処理の並行実行を防ぐ制御
-                # print(
-                #     f"🔍 Checking if batch processing is already running...", flush=True
-                # )
-                if (
-                    hasattr(TradeMini, "_mp_batch_processing")
-                    and TradeMini._mp_batch_processing
-                ):
-                    print(
-                        f"⚠️ バッチ処理が既に実行中、スキップ: Batch #{batch_id}",
-                        flush=True,
-                    )
-                    continue
+                # バッチ処理直接実行（排他制御削除）
 
-                # バッチ処理フラグを設定
-                TradeMini._mp_batch_processing = True
-                # print(f"🔒 バッチ処理開始: Batch #{batch_id}", flush=True)
+                # バッチ処理開始時間を記録
+                start_time = time.time()
 
-                try:
-                    # バッチ処理開始時間を記録
-                    start_time = time.time()
-
-                    # 🚀 高速処理（JSONからQuestDB形式への直接変換）
-                    TradeMini._process_batch_lightning_fast(
-                        tickers, batch_timestamp, batch_id, worker_heartbeat
-                    )
-                finally:
-                    # バッチ処理フラグをクリア
-                    TradeMini._mp_batch_processing = False
-                    # print(f"🔓 バッチ処理完了: Batch #{batch_id}", flush=True)
+                # 🚀 高速処理（JSONからQuestDB形式への直接変換）
+                TradeMini._process_batch_lightning_fast(
+                    tickers, batch_timestamp, batch_id, worker_heartbeat
+                )
 
                 # 🕒 処理完了後ハートビート更新
                 try:
@@ -707,12 +686,12 @@ class TradeMini:
                 TradeMini._mp_config.bybit_environment,
                 TradeMini._mp_config.bybit_api_url,
             )
-            print("✅ Bybitクライアントマルチプロセス初期化完了", flush=True)
+            # print("✅ Bybitクライアントマルチプロセス初期化完了", flush=True)
             logger.info("✅ Bybitクライアントマルチプロセス初期化完了")
 
             # SymbolMapperを初期化
             TradeMini._mp_symbol_mapper = SymbolMapper(TradeMini._mp_bybit_client)
-            print("✅ 銘柄マッパーマルチプロセス初期化完了", flush=True)
+            # print("✅ 銘柄マッパーマルチプロセス初期化完了", flush=True)
             logger.info("✅ 銘柄マッパーマルチプロセス初期化完了")
 
             # PositionManagerを初期化（config, mexc_client, bybit_client, symbol_mapperの順序）
@@ -722,28 +701,28 @@ class TradeMini:
                 TradeMini._mp_bybit_client,
                 TradeMini._mp_symbol_mapper,
             )
-            print("✅ ポジションマネージャマルチプロセス初期化完了", flush=True)
+            # print("✅ ポジションマネージャマルチプロセス初期化完了", flush=True)
             logger.info("✅ ポジションマネージャマルチプロセス初期化完了")
 
             # PositionManagerが初期化されたのでstrategyに参照を設定
             TradeMini._mp_strategy.position_manager = TradeMini._mp_position_manager
-            print("✅ 戦略にポジションマネージャを設定完了", flush=True)
+            # print("✅ 戦略にポジションマネージャを設定完了", flush=True)
             logger.info("✅ 戦略にポジションマネージャを設定完了")
 
             # QuestDBクライアントを初期化
             TradeMini._mp_questdb_client = QuestDBClient(TradeMini._mp_config)
-            print("✅ QuestDBクライアントマルチプロセス初期化完了", flush=True)
+            # print("✅ QuestDBクライアントマルチプロセス初期化完了", flush=True)
             logger.info("✅ QuestDBクライアントマルチプロセス初期化完了")
 
             # QuestDBクライアントもstrategyに設定
             TradeMini._mp_strategy.questdb_client = TradeMini._mp_questdb_client
-            print("✅ 戦略にQuestDBクライアントを設定完了", flush=True)
+            # print("✅ 戦略にQuestDBクライアントを設定完了", flush=True)
             logger.info("✅ 戦略にQuestDBクライアントを設定完了")
 
-            print(
-                "✅ マルチプロセスコンポーネント初期化成功",
-                flush=True,
-            )
+            # print(
+            #     "✅ マルチプロセスコンポーネント初期化成功",
+            #     flush=True,
+            # )
             logger.info("✅ マルチプロセスコンポーネント初期化成功")
 
         except Exception as e:
@@ -802,7 +781,7 @@ class TradeMini:
             # 🚀 戦略処理（メイン責務を移譲）
             strategy_start = time.time()
             # print("🔍 strategy_start設定完了", flush=True)
-            print(f"📊 ステップ1: 戦略処理開始 ({len(tickers)}ティッカー)", flush=True)
+            # print(f"📊 ステップ1: 戦略処理開始 ({len(tickers)}ティッカー)", flush=True)
             # print(
             #     f"🔍 _mp_strategy is None: {TradeMini._mp_strategy is None}", flush=True
             # )
