@@ -189,7 +189,7 @@ class PositionManager:
             return MarginMode.ISOLATED
 
     def _calculate_position_size(
-        self, symbol: str, side: str, entry_price: float
+        self, symbol: str, side: str, entry_price: float, price_change_percent: float
     ) -> Tuple[float, float, float]:
         """
         ポジションサイズを計算
@@ -198,31 +198,72 @@ class PositionManager:
             symbol: 銘柄
             side: "LONG" or "SHORT"
             entry_price: エントリー価格
+            price_change_percent: 価格変動率（%）
 
         Returns:
             (position_size, leverage, margin_required)
         """
         # 銘柄情報を取得してレバレッジ上限を確認
-        symbol_info = self.mexc_client.get_symbol_info(symbol)
         max_leverage = 100  # デフォルト値
 
-        if symbol_info.get("success"):
-            max_leverage = float(symbol_info.get("data", {}).get("maxLeverage", 100))
+        if self.trading_exchange == "bybit":
+            # Bybitの場合は、変換された銘柄でシンボル情報を取得
+            bybit_symbol = self.symbol_mapper.get_bybit_symbol(symbol)
+            if bybit_symbol:
+                symbol_info = self.bybit_client.get_symbol_info(bybit_symbol)
+                if symbol_info.get("success"):
+                    max_leverage = float(
+                        symbol_info.get("data", {}).get("maxLeverage", 100)
+                    )
+        else:
+            # MEXCの場合
+            symbol_info = self.mexc_client.get_symbol_info(symbol)
+            if symbol_info.get("success"):
+                max_leverage = float(
+                    symbol_info.get("data", {}).get("maxLeverage", 100)
+                )
 
         # 使用可能資金を計算
         usable_capital = self.account_balance * (self.capital_usage_percent / 100.0)
+        print(
+            f"💰使用可能資金: {usable_capital}/{self.account_balance} ({self.capital_usage_percent}%)",
+            flush=True,
+        )
+        amount = self.account_balance / entry_price
+        print(f"🎳数量: {amount} {symbol}", flush=True)
 
         # 現在のポジション数を考慮して資金を分配
         active_positions = len(self.positions)
         remaining_slots = max(1, self.max_concurrent_positions - active_positions)
-        capital_per_position = usable_capital / remaining_slots
+        print(
+            f"📊アクティブポジション数: {active_positions}(残：{remaining_slots}/{self.max_concurrent_positions})",
+            flush=True,
+        )
+        capital_per_position = usable_capital  # / remaining_slots
 
-        # 2倍逆行で設定された損失率になるレバレッジを計算
-        # 2倍逆行 = 100%逆行での損失を制限
-        # 損失率 = (逆行率 / レバレッジ) * 100
-        # max_loss_on_2x_reversal% = (100% / leverage) * 100
-        # leverage = 100 / max_loss_on_2x_reversal
-        safe_leverage = min(100.0 / self.max_loss_on_2x_reversal, max_leverage)
+        # 価格差に基づいたレバレッジを計算
+        # レバレッジ = usable_capital / (2 * 価格差)
+        # 価格差は価格変動率の絶対値を使用
+        price_diff_percent = abs(price_change_percent)
+
+        logger.info(
+            f"🔍 レバレッジ計算開始: 価格変動={price_change_percent:.3f}%, 絶対値={price_diff_percent:.3f}%"
+        )
+
+        if price_diff_percent > 0:
+            # 価格差に基づくレバレッジ計算
+            calculated_leverage = usable_capital / (
+                2 * ((entry_price * price_diff_percent) / (100 + price_diff_percent))
+            )
+            # 最大レバレッジと比較して安全な値を選択
+            safe_leverage = min(calculated_leverage, max_leverage)
+            logger.info(
+                f"📈 価格差: {price_diff_percent:.3f}% → レバレッジ: {calculated_leverage:.2f}x (制限後: {safe_leverage:.2f}x)"
+            )
+        else:
+            # 価格差が0の場合はデフォルト値を使用
+            safe_leverage = min(10.0, max_leverage)  # 控えめなデフォルト値
+            logger.info(f"⚠️ 価格差が0% → デフォルトレバレッジ: {safe_leverage:.2f}x")
 
         # ポジションサイズ計算
         # position_value = capital_per_position * leverage
@@ -270,7 +311,7 @@ class PositionManager:
         if len(self.positions) >= self.max_concurrent_positions:
             return (
                 False,
-                f"Maximum concurrent positions ({self.max_concurrent_positions}) reached",
+                f"最大ポジション({self.max_concurrent_positions})に到達",
             )
 
         # 残高チェック
@@ -286,7 +327,12 @@ class PositionManager:
         return True, "OK"
 
     def open_position(
-        self, symbol: str, side: str, entry_price: float, timestamp: datetime = None
+        self,
+        symbol: str,
+        side: str,
+        entry_price: float,
+        price_change_percent: float,
+        timestamp: datetime = None,
     ) -> Tuple[bool, str, Optional[Position]]:
         """
         ポジションを開く
@@ -295,6 +341,7 @@ class PositionManager:
             symbol: 銘柄
             side: "LONG" or "SHORT"
             entry_price: エントリー価格
+            price_change_percent: 価格変動率（%）
             timestamp: エントリー時刻
 
         Returns:
@@ -310,7 +357,7 @@ class PositionManager:
 
         # ポジションサイズ計算
         position_size, leverage, margin_required = self._calculate_position_size(
-            symbol, side, entry_price
+            symbol, side, entry_price, price_change_percent
         )
 
         if position_size <= 0:
@@ -324,12 +371,14 @@ class PositionManager:
             bybit_symbol = self.symbol_mapper.get_bybit_symbol(symbol)
             if not bybit_symbol:
                 return False, f"Cannot convert {symbol} to Bybit format", None
-            
+
             # Bybitでレバレッジ設定
             leverage_success = self.bybit_client.set_leverage(bybit_symbol, leverage)
             if leverage_success:
                 self.stats["margin_mode_switches"] += 1
-                logger.info(f"Set leverage for {bybit_symbol} ({symbol}) to {leverage}x on Bybit")
+                logger.info(
+                    f"Set leverage for {bybit_symbol} ({symbol}) to {leverage}x on Bybit"
+                )
 
             # 注文実行（Bybit）
             order_result = self.bybit_client.place_market_order(
