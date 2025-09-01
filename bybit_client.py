@@ -192,7 +192,7 @@ class BybitClient:
                 "/v5/market/instruments-info",
                 {"category": "linear", "symbol": symbol},
             )
-            print(response, flush=True)
+            # print(response, flush=True)
 
             if response.get("retCode") == 0:
                 instruments = response.get("result", {}).get("list", [])
@@ -333,17 +333,15 @@ class BybitClient:
         response = self._send_request("POST", "/v5/position/set-leverage", params)
 
         if response.get("retCode") == 0:
-            logger.info(f"{mexc_symbol}のレバレッジを{leverage}倍に設定")
+            logger.info(f"{symbol}のレバレッジを{leverage}倍に設定")
             return True
         else:
-            logger.error(f"{mexc_symbol}のレバレッジ設定失敗: {response.get('retMsg')}")
+            logger.error(f"{symbol}のレバレッジ設定失敗: {response.get('retMsg')}")
             return False
 
-    def get_symbol_info(self, mexc_symbol: str) -> Dict[str, Any]:
-        """銘柄情報を取得"""
-        bybit_symbol = self._convert_mexc_to_bybit_symbol(mexc_symbol)
-
-        params = {"category": "linear", "symbol": bybit_symbol}
+    def get_symbol_info(self, symbol: str) -> Dict[str, Any]:
+        """銘柄情報を取得（既にBybit形式と想定）"""
+        params = {"category": "linear", "symbol": symbol}
 
         return self._send_request("GET", "/v5/market/instruments-info", params)
 
