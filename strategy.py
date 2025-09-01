@@ -44,6 +44,7 @@ class TradingSignal:
     timestamp: datetime
     reason: str = ""
     confidence: float = 1.0  # シグナルの信頼度（0-1）
+    price_change_percent: float = 0.0  # 価格変動率（%）
 
 
 @dataclass
@@ -157,6 +158,7 @@ class TradingStrategy:
                 signal_type=SignalType.NONE,
                 price=tick.price,
                 timestamp=tick.timestamp,
+                price_change_percent=0.0,
             )
 
         # 価格変動率を取得
@@ -179,6 +181,7 @@ class TradingStrategy:
                 signal_type=SignalType.NONE,
                 price=tick.price,
                 timestamp=tick.timestamp,
+                price_change_percent=0.0,
             )
 
         signal_type = SignalType.NONE
@@ -209,6 +212,7 @@ class TradingStrategy:
                 abs(change_percent) / max(self.long_threshold, self.short_threshold),
                 2.0,
             ),
+            price_change_percent=change_percent,
         )
 
     def _check_close_signal(
@@ -597,6 +601,7 @@ class TradingStrategy:
                 abs(change_percent) / max(self.long_threshold, self.short_threshold),
                 2.0,
             ),
+            price_change_percent=change_percent,
         )
 
     def process_tick_and_execute_trades(self, tick: TickData) -> bool:
@@ -686,7 +691,7 @@ class TradingStrategy:
             )
 
             success, message, position = self.position_manager.open_position(
-                signal.symbol, "LONG", signal.price, entry_time
+                signal.symbol, "LONG", signal.price, signal.price_change_percent, entry_time
             )
 
             if success:
@@ -723,7 +728,7 @@ class TradingStrategy:
             )
 
             success, message, position = self.position_manager.open_position(
-                signal.symbol, "SHORT", signal.price, entry_time
+                signal.symbol, "SHORT", signal.price, signal.price_change_percent, entry_time
             )
 
             if success:
