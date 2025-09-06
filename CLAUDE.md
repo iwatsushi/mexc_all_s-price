@@ -24,10 +24,10 @@ MEXC Data Collectorはシンプルな暗号通貨価格データ収集システ�
 docker-compose up -d
 
 # ログ確認
-docker-compose logs -f trade-mini
+docker-compose logs -f mexc-data-collector
 
 # アプリケーション再起動
-docker-compose restart trade-mini
+docker-compose restart mexc-data-collector
 
 # アプリケーション停止
 docker-compose down
@@ -39,13 +39,13 @@ docker-compose ps
 ### 監視・デバッグ
 ```bash
 # リアルタイムログ確認
-docker compose logs -f trade-mini
+docker compose logs -f mexc-data-collector
 
 # データ収集統計を確認
-docker compose logs trade-mini | grep -E "(Statistics|Batch processed|ticks processed)"
+docker compose logs mexc-data-collector | grep -E "(Statistics|Batch processed|ticks processed)"
 
 # QuestDB書き込み状況を確認
-docker compose logs trade-mini | grep -E "(QuestDB|saved)"
+docker compose logs mexc-data-collector | grep -E "(QuestDB|saved)"
 
 # データベース接続確認
 timeout 10 docker-compose logs questdb

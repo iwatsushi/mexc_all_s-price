@@ -2,7 +2,7 @@ services:
   # QuestDB データベース
   questdb:
     image: questdb/questdb:7.3.10
-    container_name: trade-mini-questdb
+    container_name: mexc-data-collector-questdb
     ports:
       - "9000:9000"    # HTTP/Console
       - "9009:9009"    # InfluxDB Line Protocol
@@ -23,7 +23,7 @@ services:
       - QDB_HTTP_PESSIMISTIC_HEALTH_CHECK_ENABLED=true
     restart: unless-stopped
     networks:
-      - trade-mini-network
+      - mexc-data-collector-network
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'set -e; exec 3<>/dev/tcp/127.0.0.1/9003; printf \"GET / HTTP/1.0\\r\\n\\r\\n\" >&3; IFS= read -r response <&3; [[ \"$$response\" == *\"200\"* ]]'"]
       interval: 10s
@@ -31,12 +31,12 @@ services:
       retries: 10
       start_period: 40s
 
-  # Trade Mini アプリケーション
-  trade-mini:
+  # MEXC Data Collector アプリケーション
+  mexc-data-collector:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: trade-mini-app
+    container_name: mexc-data-collector-app
     depends_on:
       - questdb
     env_file:
@@ -49,10 +49,10 @@ services:
     volumes:
       - ./config.yml:/app/config.yml:ro
       - ./logs:/app/logs
-      - trade_mini_data:/app/data
+      - mexc_data_collector_data:/app/data
     restart: unless-stopped
     networks:
-      - trade-mini-network
+      - mexc-data-collector-network
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
       interval: 60s
@@ -67,23 +67,23 @@ services:
   # QuestDB Web Console (オプション)
   questdb-console:
     image: questdb/questdb:7.3.10
-    container_name: trade-mini-console
+    container_name: mexc-data-collector-console
     command: ["java", "-cp", "/opt/questdb/questdb.jar", "io.questdb.ServerMain", "-d", "/tmp", "-n"]
     ports:
       - "9001:9000"
     depends_on:
       - questdb
     networks:
-      - trade-mini-network
+      - mexc-data-collector-network
     profiles:
       - console
 
   # 開発環境用サービス
-  trade-mini-dev:
+  mexc-data-collector-dev:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: trade-mini-dev
+    container_name: mexc-data-collector-dev
     profiles:
       - dev
     depends_on:
@@ -102,16 +102,16 @@ services:
       - .:/app:ro
     restart: unless-stopped
     networks:
-      - trade-mini-network
+      - mexc-data-collector-network
     command: ["python", "-u", "main.py"]
 
 # ネットワーク
 networks:
-  trade-mini-network:
+  mexc-data-collector-network:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.25.0.0/16
+        - subnet: 172.26.0.0/16
 
 # ボリューム
 volumes:
@@ -121,9 +121,9 @@ volumes:
       type: none
       o: bind
       device: ./data/questdb
-  trade_mini_data:
+  mexc_data_collector_data:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: ./data/trade-mini
+      device: ./data/mexc-data-collector
