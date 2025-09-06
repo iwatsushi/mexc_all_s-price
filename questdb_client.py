@@ -38,12 +38,10 @@ class QuestDBClient:
         self.running = True
         self.tick_worker_thread = None
 
-        # 統計
+        # 統計（最小限）
         self.stats = {
             "ticks_saved": 0,
-            "connection_errors": 0,
             "write_errors": 0,
-            "last_flush": datetime.now(),
         }
 
         # 接続テスト
@@ -116,11 +114,8 @@ class QuestDBClient:
                 sock.close()
 
                 # 成功時はエラーカウントをリセット
-                if self.stats["write_errors"] > 0:
-                    logger.info(
-                        f"QuestDB ILP connection restored after {self.stats['write_errors']} errors"
-                    )
-                    self.stats["write_errors"] = 0
+                # 接続復旧ログをCPU負荷軽減のため削除
+                self.stats["write_errors"] = 0
 
                 return True
 
@@ -130,10 +125,8 @@ class QuestDBClient:
                 else:
                     # 最終試行失敗時のみエラーログ（頻度削減）
                     self.stats["write_errors"] += 1
-                    if self.stats["write_errors"] % 10 == 1:
-                        logger.warning(
-                            f"QuestDB ILP connection failed after {max_retries} retries (error #{self.stats['write_errors']}): {e}"
-                        )
+                    if self.stats["write_errors"] % 20 == 1:  # エラーログをさらに削減
+                        logger.warning(f"QuestDB connection failed (#{self.stats['write_errors']})")
                     return False
 
         return False
@@ -164,7 +157,6 @@ class QuestDBClient:
                 if should_flush and batch:
                     if self._flush_tick_batch(batch):
                         self.stats["ticks_saved"] += len(batch)
-                        self.stats["last_flush"] = datetime.now()
 
                     batch.clear()
                     last_flush = current_time
@@ -238,7 +230,6 @@ class QuestDBClient:
             # 直接送信（バッファリングせず即座に書き込み）
             if self._send_ilp_data(ilp_data):
                 self.stats["ticks_saved"] += len(ilp_lines)
-                self.stats["last_flush"] = datetime.now()
 
                 # ILP送信成功ログをCPU負荷軽減のため削除
                 return len(ilp_lines)

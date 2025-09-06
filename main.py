@@ -134,52 +134,13 @@ class MEXCDataCollector:
             raise
 
     def _on_ticker_batch_received(self, tickers: list, ws_receive_time=None):
-        """WebSocket受信コールバック"""
+        """WebSocket受信コールバック（超軽量版）"""
         try:
             self.stats["batches_received"] += 1
-            current_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            # logger.debug(tickers)
-
-            # 🕒 レイテンシ計算（最新のティッカータイムスタンプと比較）
-            latency_info = ""
-            if tickers and len(tickers) > 0:
-                # 🚀 最新のタイムスタンプを検索（最も新しいデータ時刻）
-                latest_timestamp = 0
-                valid_timestamps = 0
-                for ticker in tickers:
-                    if isinstance(ticker, dict):
-                        ts = ticker.get("timestamp")
-                        if ts:
-                            latest_timestamp = max(latest_timestamp, int(ts))
-                            valid_timestamps += 1
-
-                if latest_timestamp > 0 and valid_timestamps > 0:
-                    if ws_receive_time is not None:
-                        # 🚀 WebSocket受信直後のwall clock timeを直接使用
-                        receive_time_ms = int(ws_receive_time * 1000)
-                        time_source = "direct"
-                    else:
-                        # フォールバック：現在時刻を使用
-                        receive_time_ms = int(time.time() * 1000)
-                        time_source = "callback"
-
-                    # 🔍 デバッグ: タイムスタンプの値を確認
-                    logger.debug(f"🔍 Latest MEXC timestamp: {latest_timestamp}")
-                    logger.debug(
-                        f"🔍 Receive time: {ws_receive_time} -> {receive_time_ms}ms"
-                    )
-                    logger.debug(
-                        f"🔍 Valid timestamps in batch: {valid_timestamps}/{len(tickers)}"
-                    )
-
-                    latency_ms = receive_time_ms - latest_timestamp
-                    latency_info = (
-                        f" | ⏱️ Latency: {latency_ms}ms ({time_source}, latest)"
-                    )
-
-            logger.info(
-                f"📨 [{current_time}] Batch #{self.stats['batches_received']}: {len(tickers)} tickers received{latency_info}"
-            )
+            
+            # 🚀 ログを大幅削減（100回に1回のみ）
+            if self.stats["batches_received"] % 100 == 0:
+                logger.info(f"📨 Batch #{self.stats['batches_received']}: {len(tickers)} tickers")
 
             # 🚀 高速化: 非同期でデータ処理（並列処理）
             asyncio.create_task(
@@ -190,44 +151,34 @@ class MEXCDataCollector:
             logger.error(f"Error in reception callback: {e}")
 
     async def _process_ticker_batch_fast(self, tickers: list, batch_id: int):
-        """高速バッチ処理（QuestDBのみ）"""
+        """高速バッチ処理（超軽量版）"""
         try:
-            start_time = time.time()
-
-            # 🚀 即座に統計更新（レスポンス優先）
+            # 🚀 時間計算を削除（CPU負荷軽減）
             self.stats["ticks_processed"] += len(tickers)
 
-            # QuestDB保存のみ（data_managerは不要のため削除）
-            saved_count = await self._save_to_questdb_fast(tickers, start_time)
-
-            # 統計更新
+            # QuestDB保存のみ
+            saved_count = await self._save_to_questdb_fast(tickers)
             self.stats["ticks_saved"] += saved_count
 
-            duration = time.time() - start_time
-
-            # ログ頻度を大幅削減（パフォーマンス優先）
-            if batch_id % 20 == 0:  # 20回に1回のみログ
-                logger.info(
-                    f"⚡ Fast batch #{batch_id}: {saved_count} saved in {duration:.3f}s"
-                )
+            # ログを完全削除（CPU負荷最小化）
 
         except Exception as e:
-            logger.error(f"Error in fast ticker batch: {e}")
+            logger.error(f"Batch error: {e}")
 
     # 古い関数群削除：_process_ticker_batch()、_save_to_questdb_batch()
     # → _process_ticker_batch_fast()、_save_to_questdb_fast() に統一
 
-    async def _save_to_questdb_fast(self, tickers: list, batch_timestamp: float) -> int:
-        """高速QuestDB保存"""
+    async def _save_to_questdb_fast(self, tickers: list) -> int:
+        """高速QuestDB保存（超軽量版）"""
         try:
             ilp_lines = []
-            batch_ts_ns = int(batch_timestamp * 1_000_000_000)
+            current_time_ns = int(time.time() * 1_000_000_000)
 
             for ticker_data in tickers:
                 if not isinstance(ticker_data, dict):
                     continue
 
-                symbol = ticker_data.get("symbol", "")
+                symbol = ticker_data.get("symbol")
                 price = ticker_data.get("lastPrice")
 
                 if symbol and price:
@@ -235,27 +186,18 @@ class MEXCDataCollector:
                         price_f = float(price)
                         volume_f = float(ticker_data.get("volume24", "0"))
 
-                        # 🕒 MEXCのタイムスタンプを使用（ミリ秒→ナノ秒に変換）
+                        # 🚀 タイムスタンプ処理を簡素化
                         mexc_timestamp = ticker_data.get("timestamp")
-                        if mexc_timestamp:
-                            timestamp_ns = (
-                                int(mexc_timestamp) * 1_000_000
-                            )  # ミリ秒→ナノ秒
-                        else:
-                            timestamp_ns = batch_ts_ns  # フォールバック
+                        timestamp_ns = int(mexc_timestamp) * 1_000_000 if mexc_timestamp else current_time_ns
 
-                        line = f"tick_data,symbol={symbol} price={price_f},volume={volume_f} {timestamp_ns}"
-                        ilp_lines.append(line)
+                        ilp_lines.append(f"tick_data,symbol={symbol} price={price_f},volume={volume_f} {timestamp_ns}")
                     except (ValueError, TypeError):
                         continue
 
-            if ilp_lines:
-                saved_count = self.questdb_client.save_ilp_lines(ilp_lines)
-                return saved_count
-
-            return 0
+            return self.questdb_client.save_ilp_lines(ilp_lines) if ilp_lines else 0
+            
         except Exception as e:
-            logger.error(f"Error in fast QuestDB save: {e}")
+            logger.error(f"QuestDB save error: {e}")
             return 0
 
     async def run(self):
@@ -289,35 +231,21 @@ class MEXCDataCollector:
         """統計表示タイマー"""
         while self.running:
             try:
-                await asyncio.sleep(60)  # 60秒間隔に変更（CPU負荷軽減）
+                await asyncio.sleep(120)  # 120秒間隔に変更（CPU負荷最小化）
                 if self.running:
                     self._show_stats()
             except Exception as e:
                 logger.error(f"Error in stats timer: {e}")
 
     def _show_stats(self):
-        """統計情報表示"""
+        """統計情報表示（軽量版）"""
         try:
-            uptime = (datetime.now() - self.stats["start_time"]).total_seconds()
-
-            logger.info("📊 === MEXC Data Collector Statistics ===")
-            logger.info(f"⏱️  稼働時間: {uptime:.1f}秒 ({uptime/60:.1f}分)")
-            logger.info(f"📨 受信バッチ数: {self.stats['batches_received']}")
-            logger.info(f"📈 処理ティック数: {self.stats['ticks_processed']}")
-            logger.info(f"💾 QuestDB保存数: {self.stats['ticks_saved']}")
-
-            # 処理レート
-            if uptime > 0:
-                batch_rate = self.stats["batches_received"] / uptime
-                tick_rate = self.stats["ticks_processed"] / uptime
-                logger.info(
-                    f"📊 処理レート: {batch_rate:.2f} batches/s, {tick_rate:.2f} ticks/s"
-                )
-
-            logger.info("=" * 50)
-
+            uptime = int((datetime.now() - self.stats["start_time"]).total_seconds())
+            
+            logger.info(f"📊 Stats: {uptime}s | Batches: {self.stats['batches_received']} | Saved: {self.stats['ticks_saved']}")
+            
         except Exception as e:
-            logger.error(f"Error showing stats: {e}")
+            logger.error(f"Stats error: {e}")
 
     def _setup_signal_handlers(self):
         """シグナルハンドラー設定"""

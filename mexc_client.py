@@ -314,41 +314,18 @@ class MEXCWebSocketClient:
                     f"⚡ High-freq update: {single_ticker.get('symbol', 'unknown')}"
                 )
             elif data.get("channel") == "rs.sub.tickers":
-                logger.info(f"Bulk subscription confirmed: {data.get('data')}")
-                return
+                return  # サブスクリプション確認
             elif data.get("channel") == "rs.sub.ticker":
-                logger.info(f"Individual subscription confirmed: {data.get('data')}")
-                return
+                return  # 個別サブスクリプション確認
             elif data.get("channel") == "pong":
-                pong_data = data.get("data", "unknown")
-
-                # 重複pongチェック
-                if self._last_pong_timestamp == pong_data:
-                    logger.debug(f"💓 Duplicate pong ignored: {pong_data}")
-                    return
-
-                self._last_pong_timestamp = pong_data
-                logger.info(f"💓 サーバーからpong受信: {pong_data}")
-                return
+                self._last_pong_timestamp = data.get("data")
+                return  # pong処理
             else:
-                channel = data.get("channel", "unknown")
-                logger.info(
-                    f"🔍 Unhandled channel: {channel}, data keys: {list(data.keys())}"
-                )
-                if channel not in ["push.tickers", "tickers"]:  # 頻繁なメッセージは除外
-                    logger.info(f"🔍 Full unhandled message: {data}")
-                return
+                return  # 未処理チャンネル
 
             # 🚀 ティッカーデータのバッチ処理
             if isinstance(tickers, list) and len(tickers) > 0:
-                logger.debug(f"🎯 Calling batch callback with {len(tickers)} tickers")
-                # 🚀 重要：解凍済みティッカーデータを渡して処理は後段で（受信ループ保護）
-                # 受信時刻も渡す（より正確なレイテンシ計算のため）
-                if receive_time is not None:
-                    self.batch_callback(tickers, receive_time)
-                else:
-                    self.batch_callback(tickers)
-                logger.debug(f"✅ Batch callback completed")
+                self.batch_callback(tickers, receive_time)
 
         except Exception as e:
             # エラーログは出すが、WebSocket受信は継続
