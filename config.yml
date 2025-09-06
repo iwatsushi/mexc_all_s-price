@@ -1,108 +1,26 @@
-# Trade Mini 設定ファイル
-
-# 取引設定
-trading:
-    # 使用する取引所（将来のMEXC対応のため）
-    # "bybit" - Bybitで取引（推奨）
-    # "mexc" - MEXCで取引（将来実装予定）
-    exchange: "bybit"
-
-# Bybit API設定
-bybit:
-    # 使用環境の選択
-    # "live" - 本番取引（実資金）
-    # "demo" - 本番デモトレード（推奨）
-    # "testnet" - 開発者向けテストネット
-    # "websocket-ping_only" - WebSocket受信+ping送信のみ（データ処理なし）
-    environment: "demo"
-
-    # 本番取引環境（実資金）
-    live:
-        api_url: "https://api.bybit.com"
-        description: "Live trading with real funds"
-
-    # 本番デモトレード環境（仮想資金）
-    demo:
-        api_url: "https://api.bybit.com"
-        description: "Demo trading on production servers"
-
-    # テストネット環境（開発・レート制限検証用）
-    testnet:
-        api_url: "https://api-testnet.bybit.com"
-        description: "Developer testnet environment"
-
-    # WebSocket+ping監視専用モード
-    websocket-ping_only:
-        description: "WebSocket receive + ping only mode (no data processing, no trading)"
-        disable_data_processing: true
-        disable_multiprocess: true
-        disable_trading: true
-        disable_questdb: true
-
-# 取引戦略パラメータ
-strategy:
-    # N秒前の価格と比較（現実的な時間枠）
-    price_comparison_seconds: 10 # 5 一時的に上昇
-
-    # 上昇トリガー閾値（X%）- テスト用に非常に小さく設定
-    long_threshold_percent: 0.005 # 0.001% 非常に小さく調整（テスト用）
-
-    # 下落トリガー閾値（Y%）- テスト用に非常に小さく設定
-    short_threshold_percent: 0.005 # 0.001% 非常に小さく調整（テスト用）
-
-    # 利確判定の反発閾値（Z%）- トレンドフォロー戦略
-    reversal_threshold_percent: 0.015 # 1.5 一時的に下降
-
-    # 最小利益率（M%）- 効率的な利確
-    min_profit_percent: 0.005 # 0.8 上昇
-
-# ポジション管理
-position:
-    # 全資産に対する使用比率（1ポジションあたり）- 2倍逆行で総資産10%損失リスク想定
-    capital_usage_percent: 10
-
-    # 同時保有可能な最大銘柄数 - ユーザー要求通り3本まで
-    max_concurrent_positions: 3
-
-    # クロスマージン切替閾値（USDT）
-    cross_margin_threshold: 1000.0
-
-    # 2倍逆行時の最大損失率（%）- ユーザー要求通り
-    max_loss_on_2x_reversal: 10.0
-
-# データ管理
-data:
-    # ティックデータ保持時間（時間）
-    tick_data_retention_hours: 6
-
-    # データ保存間隔（秒）
-    save_interval_seconds: 60
+# MEXC Data Collector 設定ファイル
 
 # MEXC API設定
 mexc:
-    # 本番環境
+    # 本番環境（MEXCにはテストネットがないため本番環境を使用）
     production:
         # WebSocket URL
         ws_url: "wss://contract.mexc.com/edge"
-        # REST API URL
+        # REST API URL（将来の拡張用）
         api_url: "https://api.mexc.com"
 
-    # テストネット環境（デモトレード）
-    testnet:
-        # WebSocket URL
-        ws_url: "wss://contract.testnet.mexc.com/ws"
-        # REST API URL
-        api_url: "https://contract.testnet.mexc.com"
-
-    # 使用環境の選択 ("production" or "testnet")
-    # 注: MEXCにはAPIレベルのテストネットが存在しないため、productionを使用
-    # デモトレード的な動作のため、最小限のパラメータに設定
+    # 使用環境（常に"production"）
     environment: "production"
 
-    # 再接続設定
+    # WebSocket再接続設定
     reconnect_interval: 5
     max_reconnect_attempts: 10
     ping_interval: 20
+
+# データ管理設定
+data:
+    # ティックデータ保持時間（時間）- メモリ内一時保存用
+    tick_data_retention_hours: 1
 
 # QuestDB設定
 questdb:
@@ -112,22 +30,10 @@ questdb:
 
     # テーブル名
     tick_table: "tick_data"
-    trade_table: "trade_records"
 
 # ログ設定
 logging:
-    level: "DEBUG"
-    file: "trade_mini.log"
+    level: "INFO"
+    file: "data_collector.log"
     max_size_mb: 10
     backup_count: 5
-
-# リスク管理
-risk:
-    # 強制停止条件（連続損失回数）
-    max_consecutive_losses: 5
-
-    # 1日の最大取引回数
-    max_trades_per_day: 50
-
-    # 最小注文サイズ（USDT）
-    min_order_size: 10.0

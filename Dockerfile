@@ -1,4 +1,4 @@
-# Trade Mini Dockerfile
+# MEXC Data Collector Dockerfile
 FROM python:3.11-slim
 
 # 作業ディレクトリ設定
@@ -15,17 +15,14 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# アプリケーションファイルをコピー
+# アプリケーションファイルをコピー（データ収集専用）
 COPY config.py .
 COPY mexc_client.py .
 COPY mexc_websocket_process.py .
-COPY bybit_client.py .
-COPY symbol_mapper.py .
 COPY data_manager.py .
-COPY strategy.py .
-COPY position_manager.py .
 COPY questdb_client.py .
 COPY main.py .
+COPY websocket_monitor.py .
 COPY config.yml .
 
 # ログディレクトリ作成
@@ -36,12 +33,9 @@ RUN useradd -m -u 1000 trader && \
     chown -R trader:trader /app
 USER trader
 
-# ポート公開（必要に応じて）
-EXPOSE 8080
-
-# ヘルスチェック
+# ヘルスチェック（プロセス生存確認）
 HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8080/health', timeout=5)" || exit 1
+    CMD python -c "import sys; sys.exit(0)"
 
 # エントリーポイント
 CMD ["python", "main.py"]

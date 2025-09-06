@@ -1,45 +1,23 @@
 """
-QuestDB保存クライアント
+QuestDB保存クライアント（ティックデータ専用）
 """
 
 import logging
 import socket
 import threading
 import time
-from dataclasses import dataclass
 from datetime import datetime
 from queue import Empty, Queue
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from config import Config
 from mexc_client import TickData
-from position_manager import Position
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class TradeRecord:
-    """取引記録"""
-
-    id: str
-    symbol: str
-    side: str
-    open_time: datetime
-    open_price: float
-    quantity_symbol: float
-    quantity_usdt: float
-
-    # 決済情報（決済時に更新）
-    close_time: Optional[datetime] = None
-    close_price: Optional[float] = None
-    realized_pnl: Optional[float] = None
-    fees: Optional[float] = None
-    forced_liquidation: bool = False
-
-
 class QuestDBClient:
-    """QuestDB保存クライアント"""
+    """QuestDB保存クライアント（ティックデータ専用）"""
 
     def __init__(self, config: Config):
         self.config = config
@@ -48,7 +26,6 @@ class QuestDBClient:
         self.ilp_port = config.questdb_ilp_port
 
         self.tick_table = config.tick_table_name
-        self.trade_table = config.trade_table_name
 
         # バッファリング設定
         self.batch_size = 100
@@ -56,24 +33,18 @@ class QuestDBClient:
 
         # バッファ
         self.tick_buffer: Queue = Queue()
-        self.trade_record_buffer: Queue = Queue()
 
         # ワーカースレッド
         self.running = True
         self.tick_worker_thread = None
-        self.trade_worker_thread = None
 
         # 統計
         self.stats = {
             "ticks_saved": 0,
-            "trades_saved": 0,
             "connection_errors": 0,
             "write_errors": 0,
             "last_flush": datetime.now(),
         }
-
-        # スレッドセーフティ
-        # self._lock = threading.Lock()  # ロック削除
 
         # 接続テスト
         self._test_connection()
@@ -131,12 +102,7 @@ class QuestDBClient:
         )
         self.tick_worker_thread.start()
 
-        self.trade_worker_thread = threading.Thread(
-            target=self._trade_worker, daemon=True, name="questdb_trade_worker"
-        )
-        self.trade_worker_thread.start()
-
-        logger.info("🚀 QuestDBワーカースレッド開始")
+        logger.info("🚀 QuestDBワーカースレッド開始（ティックデータのみ）")
 
     def _send_ilp_data(self, data: str) -> bool:
         """ILPデータをQuestDBに送信（リトライ機能付き）"""
@@ -215,46 +181,6 @@ class QuestDBClient:
 
         logger.info("🛑 ティックデータワーカー停止")
 
-    def _trade_worker(self):
-        """取引記録ワーカー"""
-        logger.info("📈 取引記録ワーカー開始")
-
-        batch = []
-        last_flush = time.time()
-
-        while self.running:
-            try:
-                # バッファからデータを取得
-                try:
-                    trade_record = self.trade_record_buffer.get(timeout=1.0)
-                    batch.append(trade_record)
-                except Empty:
-                    pass
-
-                current_time = time.time()
-
-                # フラッシュ条件判定
-                should_flush = len(batch) >= self.batch_size or (
-                    batch and (current_time - last_flush) >= self.flush_interval
-                )
-
-                if should_flush and batch:
-                    if self._flush_trade_batch(batch):
-                        self.stats["trades_saved"] += len(batch)
-
-                    batch.clear()
-                    last_flush = current_time
-
-            except Exception as e:
-                logger.error(f"取引ワーカーエラー: {e}")
-                time.sleep(1.0)
-
-        # 終了時の残りデータ処理
-        if batch:
-            self._flush_trade_batch(batch)
-
-        logger.info("🛑 取引記録ワーカー停止")
-
     def _flush_tick_batch(self, batch: List[TickData]) -> bool:
         """ティックデータバッチを送信"""
         try:
@@ -275,51 +201,6 @@ class QuestDBClient:
 
         except Exception as e:
             logger.error(f"Error flushing tick batch: {e}")
-            return False
-
-    def _flush_trade_batch(self, batch: List[TradeRecord]) -> bool:
-        """取引記録バッチを送信"""
-        try:
-            lines = []
-            for record in batch:
-                # オープン時と決済時で異なるフィールド構成
-                timestamp_ns = int(record.open_time.timestamp() * 1_000_000_000)
-
-                fields = [
-                    f'symbol="{record.symbol}"',
-                    f'side="{record.side}"',
-                    f"open_price={record.open_price}",
-                    f"quantity_symbol={record.quantity_symbol}",
-                    f"quantity_usdt={record.quantity_usdt}",
-                ]
-
-                # 決済情報が存在する場合
-                if record.close_time is not None:
-                    close_timestamp_ns = int(
-                        record.close_time.timestamp() * 1_000_000_000
-                    )
-                    fields.extend(
-                        [
-                            f"close_time={close_timestamp_ns}i",
-                            f"close_price={record.close_price or 0.0}",
-                            f"realized_pnl={record.realized_pnl or 0.0}",
-                            f"fees={record.fees or 0.0}",
-                            f"forced_liquidation={str(record.forced_liquidation).lower()}",
-                        ]
-                    )
-
-                line = (
-                    f'{self.trade_table},id="{record.id}",symbol={record.symbol} '
-                    f"{','.join(fields)} "
-                    f"{timestamp_ns}"
-                )
-                lines.append(line)
-
-            ilp_data = "\n".join(lines) + "\n"
-            return self._send_ilp_data(ilp_data)
-
-        except Exception as e:
-            logger.error(f"Error flushing trade batch: {e}")
             return False
 
     def save_tick_data(self, tick: TickData):
@@ -375,64 +256,12 @@ class QuestDBClient:
             logger.error(f"Error sending ILP lines to QuestDB: {e}")
             return 0
 
-    def save_trade_open(
-        self,
-        trade_id: str,
-        symbol: str,
-        side: str,
-        open_time: datetime,
-        open_price: float,
-        quantity_symbol: float,
-        quantity_usdt: float,
-    ):
-        """取引オープン記録を保存"""
-        try:
-            record = TradeRecord(
-                id=trade_id,
-                symbol=symbol,
-                side=side,
-                open_time=open_time,
-                open_price=open_price,
-                quantity_symbol=quantity_symbol,
-                quantity_usdt=quantity_usdt,
-            )
-            self.trade_record_buffer.put_nowait(record)
-            logger.debug(f"Trade open record queued: {trade_id}")
-
-        except Exception as e:
-            logger.error(f"Error queuing trade open record: {e}")
-
-    def save_trade_close(
-        self,
-        trade_id: str,
-        close_time: datetime,
-        close_price: float,
-        realized_pnl: float,
-        fees: float = 0.0,
-        forced_liquidation: bool = False,
-    ):
-        """取引決済記録を保存（既存レコードを更新）"""
-        try:
-            # 決済情報付きの完全なレコードを作成
-            # 実際の実装では、既存のオープン記録を検索して更新する必要がある
-            # ここでは簡略化して新しいレコードとして保存
-
-            # 注意: 実際のQuestDBでは更新操作は限定的なため、
-            # オープン時と決済時で別々のテーブルを使用することも検討可能
-
-            logger.debug(f"Trade close record processed: {trade_id}")
-
-        except Exception as e:
-            logger.error(f"Error processing trade close record: {e}")
-
     def create_tables(self):
-        """テーブルを作成（初回のみ実行）"""
+        """QuestDBテーブル作成SQL生成（手動実行用）"""
         try:
-            # HTTP APIを使用してテーブル作成SQLを実行
-            # 実際の実装では、QuestDBのHTTP APIまたはJDBCを使用
-
+            # ティックデータテーブル
             tick_table_sql = f"""
-            CREATE TABLE IF NOT EXISTS {self.tick_table} (
+            CREATE TABLE {self.tick_table} (
                 symbol SYMBOL,
                 price DOUBLE,
                 volume DOUBLE,
@@ -440,36 +269,17 @@ class QuestDBClient:
             ) TIMESTAMP(timestamp) PARTITION BY DAY;
             """
 
-            trade_table_sql = f"""
-            CREATE TABLE IF NOT EXISTS {self.trade_table} (
-                id STRING,
-                symbol SYMBOL,
-                side SYMBOL,
-                open_price DOUBLE,
-                quantity_symbol DOUBLE,
-                quantity_usdt DOUBLE,
-                close_time TIMESTAMP,
-                close_price DOUBLE,
-                realized_pnl DOUBLE,
-                fees DOUBLE,
-                forced_liquidation BOOLEAN,
-                timestamp TIMESTAMP
-            ) TIMESTAMP(timestamp) PARTITION BY DAY;
-            """
-
             logger.info("Table creation SQL prepared (manual execution required)")
-            logger.info(f"Tick table: {tick_table_sql}")
-            logger.info(f"Trade table: {trade_table_sql}")
+            logger.info(f"Tick table SQL: {tick_table_sql}")
 
         except Exception as e:
-            logger.error(f"Error creating tables: {e}")
+            logger.error(f"Error creating table SQL: {e}")
 
     def get_stats(self) -> Dict[str, Any]:
         """統計情報を取得"""
         return {
             **self.stats,
             "tick_buffer_size": self.tick_buffer.qsize(),
-            "trade_buffer_size": self.trade_record_buffer.qsize(),
             "worker_running": self.running,
         }
 
@@ -492,89 +302,7 @@ class QuestDBClient:
         if self.tick_worker_thread and self.tick_worker_thread.is_alive():
             self.tick_worker_thread.join(timeout=10.0)
 
-        if self.trade_worker_thread and self.trade_worker_thread.is_alive():
-            self.trade_worker_thread.join(timeout=10.0)
-
         # 残りのバッファを処理
         self.flush_all()
 
-        logger.info("QuestDB client shutdown completed")
-
-
-class QuestDBTradeRecordManager:
-    """取引記録管理（QuestDBクライアントの補助クラス）"""
-
-    def __init__(self, questdb_client: QuestDBClient):
-        self.questdb = questdb_client
-        self.open_trades: Dict[str, TradeRecord] = {}
-        # self._lock = threading.Lock()  # ロック削除
-
-    def record_trade_open(self, position: Position) -> str:
-        """取引オープンを記録"""
-        trade_id = f"{position.symbol}_{int(position.entry_time.timestamp())}"
-
-        # 取引記録作成
-        record = TradeRecord(
-            id=trade_id,
-            symbol=position.symbol,
-            side=position.side,
-            open_time=position.entry_time,
-            open_price=position.entry_price,
-            quantity_symbol=position.size,
-            quantity_usdt=position.size * position.entry_price,
-        )
-
-        # メモリ上で管理
-        self.open_trades[trade_id] = record
-
-        # QuestDBに保存
-        self.questdb.save_trade_open(
-            trade_id=trade_id,
-            symbol=position.symbol,
-            side=position.side,
-            open_time=position.entry_time,
-            open_price=position.entry_price,
-            quantity_symbol=position.size,
-            quantity_usdt=position.size * position.entry_price,
-        )
-
-        logger.info(f"Trade open recorded: {trade_id}")
-        return trade_id
-
-    def record_trade_close(
-        self,
-        trade_id: str,
-        close_time: datetime,
-        close_price: float,
-        realized_pnl: float,
-        fees: float = 0.0,
-    ):
-        """取引決済を記録"""
-        record = self.open_trades.get(trade_id)
-        if not record:
-            logger.warning(f"Open trade record not found: {trade_id}")
-            return
-
-        # 決済情報を更新
-        record.close_time = close_time
-        record.close_price = close_price
-        record.realized_pnl = realized_pnl
-        record.fees = fees
-
-        # QuestDBに保存
-        self.questdb.save_trade_close(
-            trade_id=trade_id,
-            close_time=close_time,
-            close_price=close_price,
-            realized_pnl=realized_pnl,
-            fees=fees,
-        )
-
-        # メモリから削除
-        del self.open_trades[trade_id]
-
-        logger.info(f"Trade close recorded: {trade_id}")
-
-    def get_open_trades_count(self) -> int:
-        """オープン取引数を取得"""
-        return len(self.open_trades)
+        logger.info("✅ QuestDBクライアントシャットダウン完了")
