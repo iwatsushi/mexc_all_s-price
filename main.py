@@ -18,7 +18,6 @@ logger = loguru_logger
 
 # 自作モジュール
 from config import Config
-from data_manager import DataManager
 from mexc_client import MEXCClient, TickData
 from questdb_client import QuestDBClient
 
@@ -41,7 +40,6 @@ class MEXCDataCollector:
 
         # コンポーネント
         self.mexc_client = None
-        self.data_manager = None
         self.questdb_client = None
 
         # 実行制御
@@ -113,10 +111,6 @@ class MEXCDataCollector:
             self.mexc_client = MEXCClient(self.config)
             logger.info("MEXCクライアント作成完了")
 
-            # データ管理
-            self.data_manager = DataManager(self.config)
-            logger.info("データマネージャー作成完了")
-
             # QuestDB クライアント
             self.questdb_client = QuestDBClient(self.config)
             logger.info("QuestDBクライアント作成完了")
@@ -150,211 +144,80 @@ class MEXCDataCollector:
             )
 
             # 🚀 高速化: 非同期でデータ処理（並列処理）
-            asyncio.create_task(self._process_ticker_batch_fast(tickers, self.stats["batches_received"]))
+            asyncio.create_task(
+                self._process_ticker_batch_fast(tickers, self.stats["batches_received"])
+            )
 
         except Exception as e:
             logger.error(f"Error in reception callback: {e}")
 
     async def _process_ticker_batch_fast(self, tickers: list, batch_id: int):
-        """高速バッチ処理（並列最適化版）"""
+        """高速バッチ処理（QuestDBのみ）"""
         try:
             start_time = time.time()
-            
+
             # 🚀 即座に統計更新（レスポンス優先）
             self.stats["ticks_processed"] += len(tickers)
-            
-            # 🚀 QuestDB保存を並列実行
-            save_task = asyncio.create_task(self._save_to_questdb_fast(tickers, start_time))
-            
-            # 🚀 data_manager更新を並列実行
-            data_task = asyncio.create_task(self._update_data_manager_fast(tickers))
-            
-            # 両方の処理を並列実行
-            saved_count, processed_count = await asyncio.gather(save_task, data_task)
-            
+
+            # QuestDB保存のみ（data_managerは不要のため削除）
+            saved_count = await self._save_to_questdb_fast(tickers, start_time)
+
             # 統計更新
             self.stats["ticks_saved"] += saved_count
-            
+
             duration = time.time() - start_time
-            
+
             # ログ頻度を下げる（パフォーマンス優先）
             if batch_id % 5 == 0:  # 5回に1回のみログ
                 logger.info(
-                    f"⚡ Fast batch #{batch_id}: {processed_count} processed, {saved_count} saved in {duration:.3f}s"
+                    f"⚡ Fast batch #{batch_id}: {saved_count} saved in {duration:.3f}s"
                 )
 
         except Exception as e:
             logger.error(f"Error in fast ticker batch: {e}")
 
-    async def _process_ticker_batch(self, tickers: list):
-        """ティッカーバッチを処理"""
-        try:
-            start_time = time.time()
-            batch_timestamp = time.time()
-            processed_count = 0
-            saved_count = 0
-
-            # QuestDB一括書き込み用のリスト
-            tick_data_list = []
-
-            for ticker_data in tickers:
-                if not isinstance(ticker_data, dict):
-                    continue
-
-                symbol = ticker_data.get("symbol", "")
-                price = ticker_data.get("lastPrice")
-                volume = ticker_data.get("volume24", "0")
-
-                if not symbol or not price:
-                    continue
-
-                try:
-                    price_f = float(price)
-                    volume_f = float(volume)
-
-                    # TickData作成（timestampは数値型）
-                    tick = TickData(
-                        symbol=symbol,
-                        price=price_f,
-                        timestamp=int(datetime.now().timestamp() * 1_000_000_000),  # ナノ秒単位
-                        volume=volume_f,
-                    )
-
-                    # データ管理に追加
-                    self.data_manager.add_tick(tick)
-
-                    # QuestDB保存用リストに追加
-                    tick_data_list.append(tick)
-                    processed_count += 1
-
-                except (ValueError, TypeError):
-                    continue
-
-            # QuestDB一括書き込み
-            if tick_data_list:
-                saved_count = await self._save_to_questdb_batch(
-                    tick_data_list, batch_timestamp
-                )
-
-            # 統計更新
-            self.stats["ticks_processed"] += processed_count
-            self.stats["ticks_saved"] += saved_count
-
-            duration = time.time() - start_time
-            logger.info(
-                f"✅ Batch processed: {processed_count} ticks processed, {saved_count} saved to QuestDB in {duration:.3f}s"
-            )
-
-        except Exception as e:
-            logger.error(f"Error processing ticker batch: {e}")
-
-    async def _save_to_questdb_batch(
-        self, tick_data_list: list, batch_timestamp: float
-    ) -> int:
-        """QuestDBにバッチで保存"""
-        try:
-            # ILPライン形式で一括書き込み
-            ilp_lines = []
-            batch_ts_ns = int(batch_timestamp * 1_000_000_000)
-
-            for tick in tick_data_list:
-                # MEXCタイムスタンプがない場合はバッチタイムスタンプを使用
-                timestamp_ns = batch_ts_ns
-
-                # ILP形式ライン生成
-                line = f"tick_data,symbol={tick.symbol} price={tick.price},volume={tick.volume} {timestamp_ns}"
-                ilp_lines.append(line)
-
-            # QuestDBに送信
-            if ilp_lines:
-                saved_count = self.questdb_client.save_ilp_lines(ilp_lines)
-                logger.debug(f"💾 QuestDB: {saved_count} records saved")
-                return saved_count
-
-            return 0
-
-        except Exception as e:
-            logger.error(f"Error saving to QuestDB: {e}")
-            return 0
+    # 古い関数群削除：_process_ticker_batch()、_save_to_questdb_batch()
+    # → _process_ticker_batch_fast()、_save_to_questdb_fast() に統一
 
     async def _save_to_questdb_fast(self, tickers: list, batch_timestamp: float) -> int:
         """高速QuestDB保存"""
         try:
             ilp_lines = []
             batch_ts_ns = int(batch_timestamp * 1_000_000_000)
-            
+
             for ticker_data in tickers:
                 if not isinstance(ticker_data, dict):
                     continue
-                    
+
                 symbol = ticker_data.get("symbol", "")
                 price = ticker_data.get("lastPrice")
-                
+
                 if symbol and price:
                     try:
                         price_f = float(price)
                         volume_f = float(ticker_data.get("volume24", "0"))
-                        
+
                         # 🕒 MEXCのタイムスタンプを使用（ミリ秒→ナノ秒に変換）
                         mexc_timestamp = ticker_data.get("timestamp")
                         if mexc_timestamp:
-                            timestamp_ns = int(mexc_timestamp) * 1_000_000  # ミリ秒→ナノ秒
+                            timestamp_ns = (
+                                int(mexc_timestamp) * 1_000_000
+                            )  # ミリ秒→ナノ秒
                         else:
                             timestamp_ns = batch_ts_ns  # フォールバック
-                        
+
                         line = f"tick_data,symbol={symbol} price={price_f},volume={volume_f} {timestamp_ns}"
                         ilp_lines.append(line)
                     except (ValueError, TypeError):
                         continue
-            
+
             if ilp_lines:
                 saved_count = self.questdb_client.save_ilp_lines(ilp_lines)
                 return saved_count
-                
+
             return 0
         except Exception as e:
             logger.error(f"Error in fast QuestDB save: {e}")
-            return 0
-
-    async def _update_data_manager_fast(self, tickers: list) -> int:
-        """高速data_manager更新"""
-        try:
-            processed_count = 0
-            
-            for ticker_data in tickers:
-                if not isinstance(ticker_data, dict):
-                    continue
-                    
-                symbol = ticker_data.get("symbol", "")
-                price = ticker_data.get("lastPrice")
-                
-                if symbol and price:
-                    try:
-                        price_f = float(price)
-                        volume_f = float(ticker_data.get("volume24", "0"))
-                        
-                        # 🕒 MEXCのタイムスタンプを使用（ミリ秒→ナノ秒に変換）
-                        mexc_timestamp = ticker_data.get("timestamp")
-                        if mexc_timestamp:
-                            timestamp_ns = int(mexc_timestamp) * 1_000_000  # ミリ秒→ナノ秒
-                        else:
-                            timestamp_ns = int(datetime.now().timestamp() * 1_000_000_000)  # フォールバック
-                        
-                        tick = TickData(
-                            symbol=symbol,
-                            price=price_f,
-                            timestamp=timestamp_ns,
-                            volume=volume_f,
-                        )
-                        
-                        self.data_manager.add_tick(tick)
-                        processed_count += 1
-                    except (ValueError, TypeError):
-                        continue
-                        
-            return processed_count
-        except Exception as e:
-            logger.error(f"Error in fast data manager update: {e}")
             return 0
 
     async def run(self):

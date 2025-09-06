@@ -18,11 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # アプリケーションファイルをコピー（データ収集専用）
 COPY config.py .
 COPY mexc_client.py .
-COPY mexc_websocket_process.py .
-COPY data_manager.py .
 COPY questdb_client.py .
 COPY main.py .
-COPY websocket_monitor.py .
 COPY config.yml .
 
 # ログディレクトリ作成
