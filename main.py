@@ -46,6 +46,7 @@ class MEXCDataCollector:
 
         # 実行制御
         self.running = False
+        self.shutdown_event = asyncio.Event()
 
         # 統計
         self.stats = {
@@ -148,11 +149,42 @@ class MEXCDataCollector:
                 f"📨 [{current_time}] Batch #{self.stats['batches_received']}: {len(tickers)} tickers received"
             )
 
-            # 非同期でデータ処理
-            asyncio.create_task(self._process_ticker_batch(tickers))
+            # 🚀 高速化: 非同期でデータ処理（並列処理）
+            asyncio.create_task(self._process_ticker_batch_fast(tickers, self.stats["batches_received"]))
 
         except Exception as e:
             logger.error(f"Error in reception callback: {e}")
+
+    async def _process_ticker_batch_fast(self, tickers: list, batch_id: int):
+        """高速バッチ処理（並列最適化版）"""
+        try:
+            start_time = time.time()
+            
+            # 🚀 即座に統計更新（レスポンス優先）
+            self.stats["ticks_processed"] += len(tickers)
+            
+            # 🚀 QuestDB保存を並列実行
+            save_task = asyncio.create_task(self._save_to_questdb_fast(tickers, start_time))
+            
+            # 🚀 data_manager更新を並列実行
+            data_task = asyncio.create_task(self._update_data_manager_fast(tickers))
+            
+            # 両方の処理を並列実行
+            saved_count, processed_count = await asyncio.gather(save_task, data_task)
+            
+            # 統計更新
+            self.stats["ticks_saved"] += saved_count
+            
+            duration = time.time() - start_time
+            
+            # ログ頻度を下げる（パフォーマンス優先）
+            if batch_id % 5 == 0:  # 5回に1回のみログ
+                logger.info(
+                    f"⚡ Fast batch #{batch_id}: {processed_count} processed, {saved_count} saved in {duration:.3f}s"
+                )
+
+        except Exception as e:
+            logger.error(f"Error in fast ticker batch: {e}")
 
     async def _process_ticker_batch(self, tickers: list):
         """ティッカーバッチを処理"""
@@ -245,6 +277,72 @@ class MEXCDataCollector:
             logger.error(f"Error saving to QuestDB: {e}")
             return 0
 
+    async def _save_to_questdb_fast(self, tickers: list, batch_timestamp: float) -> int:
+        """高速QuestDB保存"""
+        try:
+            ilp_lines = []
+            batch_ts_ns = int(batch_timestamp * 1_000_000_000)
+            
+            for ticker_data in tickers:
+                if not isinstance(ticker_data, dict):
+                    continue
+                    
+                symbol = ticker_data.get("symbol", "")
+                price = ticker_data.get("lastPrice")
+                
+                if symbol and price:
+                    try:
+                        price_f = float(price)
+                        volume_f = float(ticker_data.get("volume24", "0"))
+                        
+                        line = f"tick_data,symbol={symbol} price={price_f},volume={volume_f} {batch_ts_ns}"
+                        ilp_lines.append(line)
+                    except (ValueError, TypeError):
+                        continue
+            
+            if ilp_lines:
+                saved_count = self.questdb_client.save_ilp_lines(ilp_lines)
+                return saved_count
+                
+            return 0
+        except Exception as e:
+            logger.error(f"Error in fast QuestDB save: {e}")
+            return 0
+
+    async def _update_data_manager_fast(self, tickers: list) -> int:
+        """高速data_manager更新"""
+        try:
+            processed_count = 0
+            
+            for ticker_data in tickers:
+                if not isinstance(ticker_data, dict):
+                    continue
+                    
+                symbol = ticker_data.get("symbol", "")
+                price = ticker_data.get("lastPrice")
+                
+                if symbol and price:
+                    try:
+                        price_f = float(price)
+                        volume_f = float(ticker_data.get("volume24", "0"))
+                        
+                        tick = TickData(
+                            symbol=symbol,
+                            price=price_f,
+                            timestamp=int(datetime.now().timestamp() * 1_000_000_000),
+                            volume=volume_f,
+                        )
+                        
+                        self.data_manager.add_tick(tick)
+                        processed_count += 1
+                    except (ValueError, TypeError):
+                        continue
+                        
+            return processed_count
+        except Exception as e:
+            logger.error(f"Error in fast data manager update: {e}")
+            return 0
+
     async def run(self):
         """メインループ実行"""
         logger.info("🚀 MEXC Data Collector開始...")
@@ -264,9 +362,8 @@ class MEXCDataCollector:
             # 統計表示タイマー開始
             asyncio.create_task(self._stats_timer())
 
-            # メインループ
-            while self.running:
-                await asyncio.sleep(1.0)
+            # メインループ（効率的な待機） - シャットダウンイベントを待機
+            await self.shutdown_event.wait()
 
         except Exception as e:
             logger.error(f"Critical error: {e}")
@@ -313,9 +410,15 @@ class MEXCDataCollector:
         def signal_handler(signum, frame):
             logger.info(f"Received signal {signum}, initiating shutdown...")
             self.running = False
+            # シャットダウンイベントをセット（非同期なのでloop経由）
+            asyncio.create_task(self._set_shutdown_event())
 
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
+
+    async def _set_shutdown_event(self):
+        """シャットダウンイベントをセット"""
+        self.shutdown_event.set()
 
     async def shutdown(self):
         """シャットダウン処理"""

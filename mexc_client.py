@@ -158,21 +158,22 @@ class MEXCWebSocketClient:
             self.ws_url,
             ping_interval=None,  # WebSocketレベルのpingは無効化
             max_size=None,  # フレームサイズ制限を解除
-            open_timeout=20,
-            close_timeout=5,
+            open_timeout=10,  # 接続タイムアウトを短縮
+            close_timeout=2,  # クローズタイムアウトを短縮
+            # 高速化のための追加設定
+            compression=None,  # 圧縮を無効化（レイテンシー優先）
+            max_queue=1000,  # 受信キューを拡大
         ) as websocket:
             self._websocket = websocket
             self._reconnect_attempts = 0  # 成功したらリセット
 
             logger.info("WebSocket connected, subscribing to tickers...")
 
-            # sub.tickers チャネルを購読（全銘柄、gzip圧縮有効）
+            # 🚀 高速化: バルク購読のみ（個別購読はMEXC先物でサポートされていない）
             subscribe_msg = {"method": "sub.tickers", "param": {}, "gzip": True}
             await websocket.send(json.dumps(subscribe_msg))
-            logger.info("Subscribed to sub.tickers channel (gzip compressed)")
-
-            # sub.tickersのみに集中（シンプル化）
-            logger.info("Focusing on sub.tickers only for continuous data")
+            logger.info("✅ Subscribed to sub.tickers channel (gzip compressed)")
+            logger.info("🚀 Fast mode: bulk subscription optimized for high throughput")
 
             # ping初期化（受信ループ内で管理）
             self._last_ping_time = time.monotonic()
@@ -197,9 +198,9 @@ class MEXCWebSocketClient:
             while not self.shutdown_event.is_set():
                 logger.debug("🔄 Entered main receive loop")
                 try:
-                    # タイムアウト付きでメッセージを受信（デバッグスクリプトと同じ方式）
+                    # タイムアウト付きでメッセージを受信（高速化のため短縮）
                     logger.debug("📥 Waiting for WebSocket message...")
-                    raw_message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
+                    raw_message = await asyncio.wait_for(websocket.recv(), timeout=0.1)
                     rx_time = time.monotonic()  # 📊 受信直後の時刻（ChatGPT5提案）
                     last_recv = rx_time
                     message_count += 1
@@ -334,8 +335,18 @@ class MEXCWebSocketClient:
             # チャンネル判定：ティッカーデータのみ処理
             if data.get("channel") == "push.tickers" and "data" in data:
                 tickers = data["data"]
+            elif data.get("channel") == "push.ticker" and "data" in data:
+                # 個別銘柄チャンネル（高頻度更新）
+                single_ticker = data["data"]
+                tickers = [single_ticker]  # 単一要素のリストとして処理
+                logger.debug(
+                    f"⚡ High-freq update: {single_ticker.get('symbol', 'unknown')}"
+                )
             elif data.get("channel") == "rs.sub.tickers":
-                logger.info(f"Subscription confirmed: {data.get('data')}")
+                logger.info(f"Bulk subscription confirmed: {data.get('data')}")
+                return
+            elif data.get("channel") == "rs.sub.ticker":
+                logger.info(f"Individual subscription confirmed: {data.get('data')}")
                 return
             elif data.get("channel") == "pong":
                 pong_data = data.get("data", "unknown")
