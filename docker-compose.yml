@@ -95,7 +95,7 @@ services:
       - QUESTDB_HOST=questdb
       - QUESTDB_PORT=9000
       - QUESTDB_ILP_PORT=9009
-      - LOG_LEVEL=DEBUG
+      - LOG_LEVEL=INFO
     volumes:
       - ./config.yml:/app/config.yml:ro
       - ./logs:/app/logs
