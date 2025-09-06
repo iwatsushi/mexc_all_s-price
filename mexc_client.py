@@ -55,7 +55,7 @@ class MEXCWebSocketClient:
         self._max_reconnect_attempts = 5
 
         # デバッグフラグ
-        self._debug_interval_stats = False
+        self._debug_interval_stats = True
 
         # ping管理（受信ループ内で実行）
         self._last_ping_time = 0
@@ -201,8 +201,9 @@ class MEXCWebSocketClient:
                     # タイムアウト付きでメッセージを受信（高速化のため短縮）
                     logger.debug("📥 Waiting for WebSocket message...")
                     raw_message = await asyncio.wait_for(websocket.recv(), timeout=0.1)
-                    rx_time = time.monotonic()  # 📊 受信直後の時刻（ChatGPT5提案）
-                    last_recv = rx_time
+                    rx_time_wall = time.time()  # 📊 受信直後の時刻（wall clock time）
+                    rx_time_mono = time.monotonic()  # monotonic time（統計用）
+                    last_recv = rx_time_mono
                     message_count += 1
 
                     # 🚀 ChatGPT5提案: 受信直後は生データをキューに投入のみ
@@ -213,7 +214,7 @@ class MEXCWebSocketClient:
                     # 📊 受信間隔測定（デバッグ時のみ）
                     if self._debug_interval_stats:
                         if last_ticker_time is not None:
-                            interval = rx_time - last_ticker_time
+                            interval = rx_time_mono - last_ticker_time
                             ticker_intervals.append(interval)
 
                             # 統計ログ（10回毎）
@@ -228,11 +229,11 @@ class MEXCWebSocketClient:
                                     f"📊 Arrival interval stats (last 10): avg={avg_interval:.3f}s, "
                                     f"min={min_interval:.3f}s, max={max_interval:.3f}s"
                                 )
-                        last_ticker_time = rx_time
+                        last_ticker_time = rx_time_mono
 
                     # 🚀 超軽量処理：生データを直接解凍してコールバック呼び出し
                     if self.batch_callback:
-                        self._process_ticker_batch_safe(raw_message)
+                        self._process_ticker_batch_safe(raw_message, rx_time_wall)
                     else:
                         logger.debug(
                             f"⚠️ No batch callback configured, dropping message #{message_count}"
@@ -286,7 +287,7 @@ class MEXCWebSocketClient:
             logger.warning(f"💓 Failed to send external ping: {e}")
             return False
 
-    def _process_ticker_batch_safe(self, raw_message):
+    def _process_ticker_batch_safe(self, raw_message, receive_time=None):
         """WebSocket受信を保護する超高速バッチティッカーデータ処理（生データ解凍統合版）"""
         if not self.batch_callback:
             logger.warning("No batch callback set!")
@@ -372,7 +373,11 @@ class MEXCWebSocketClient:
             if isinstance(tickers, list) and len(tickers) > 0:
                 logger.debug(f"🎯 Calling batch callback with {len(tickers)} tickers")
                 # 🚀 重要：解凍済みティッカーデータを渡して処理は後段で（受信ループ保護）
-                self.batch_callback(tickers)
+                # 受信時刻も渡す（より正確なレイテンシ計算のため）
+                if receive_time is not None:
+                    self.batch_callback(tickers, receive_time)
+                else:
+                    self.batch_callback(tickers)
                 logger.debug(f"✅ Batch callback completed")
 
         except Exception as e:

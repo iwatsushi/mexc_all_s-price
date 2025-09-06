@@ -133,14 +133,34 @@ class MEXCDataCollector:
             await self.shutdown()
             raise
 
-    def _on_ticker_batch_received(self, tickers: list):
+    def _on_ticker_batch_received(self, tickers: list, ws_receive_time=None):
         """WebSocket受信コールバック"""
         try:
             self.stats["batches_received"] += 1
             current_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            logger.debug(tickers)
+
+            # 🕒 レイテンシ計算（最初のティッカーのタイムスタンプと比較）
+            latency_info = ""
+            if tickers and len(tickers) > 0 and isinstance(tickers[0], dict):
+                first_ticker = tickers[0]
+                mexc_timestamp = first_ticker.get("timestamp")
+                if mexc_timestamp:
+                    if ws_receive_time is not None:
+                        # 🚀 WebSocket受信直後のwall clock timeを直接使用
+                        receive_time_ms = int(ws_receive_time * 1000)
+                        time_source = "direct"
+                    else:
+                        # フォールバック：現在時刻を使用
+                        receive_time_ms = int(time.time() * 1000)
+                        time_source = "callback"
+
+                    mexc_time_ms = int(mexc_timestamp)
+                    latency_ms = receive_time_ms - mexc_time_ms
+                    latency_info = f" | ⏱️ Latency: {latency_ms}ms ({time_source})"
 
             logger.info(
-                f"📨 [{current_time}] Batch #{self.stats['batches_received']}: {len(tickers)} tickers received"
+                f"📨 [{current_time}] Batch #{self.stats['batches_received']}: {len(tickers)} tickers received{latency_info}"
             )
 
             # 🚀 高速化: 非同期でデータ処理（並列処理）
