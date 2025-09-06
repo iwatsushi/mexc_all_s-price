@@ -295,7 +295,14 @@ class MEXCDataCollector:
                         price_f = float(price)
                         volume_f = float(ticker_data.get("volume24", "0"))
                         
-                        line = f"tick_data,symbol={symbol} price={price_f},volume={volume_f} {batch_ts_ns}"
+                        # 🕒 MEXCのタイムスタンプを使用（ミリ秒→ナノ秒に変換）
+                        mexc_timestamp = ticker_data.get("timestamp")
+                        if mexc_timestamp:
+                            timestamp_ns = int(mexc_timestamp) * 1_000_000  # ミリ秒→ナノ秒
+                        else:
+                            timestamp_ns = batch_ts_ns  # フォールバック
+                        
+                        line = f"tick_data,symbol={symbol} price={price_f},volume={volume_f} {timestamp_ns}"
                         ilp_lines.append(line)
                     except (ValueError, TypeError):
                         continue
@@ -326,10 +333,17 @@ class MEXCDataCollector:
                         price_f = float(price)
                         volume_f = float(ticker_data.get("volume24", "0"))
                         
+                        # 🕒 MEXCのタイムスタンプを使用（ミリ秒→ナノ秒に変換）
+                        mexc_timestamp = ticker_data.get("timestamp")
+                        if mexc_timestamp:
+                            timestamp_ns = int(mexc_timestamp) * 1_000_000  # ミリ秒→ナノ秒
+                        else:
+                            timestamp_ns = int(datetime.now().timestamp() * 1_000_000_000)  # フォールバック
+                        
                         tick = TickData(
                             symbol=symbol,
                             price=price_f,
-                            timestamp=int(datetime.now().timestamp() * 1_000_000_000),
+                            timestamp=timestamp_ns,
                             volume=volume_f,
                         )
                         
