@@ -1,21 +1,17 @@
 """
-MEXC取引所クライアント（WebSocket + REST API統合）
+MEXCデータ収集クライアント（WebSocket専用）
 """
 
 import asyncio
 import gzip
-import hashlib
-import hmac
 import json
 import logging
 import threading
 import time
-from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Optional
 
-import requests
 import websockets
 
 from config import Config
@@ -33,30 +29,11 @@ class TickData:
     volume: float = 0.0
 
 
-@dataclass
-class PositionData:
-    """ポジションデータ"""
-
-    symbol: str
-    side: str  # "LONG" or "SHORT"
-    size: float
-    entry_price: float
-    mark_price: float
-    pnl: float
-    margin_type: str  # "isolated" or "cross"
-
-
-@dataclass
-class OrderResult:
-    """注文結果"""
-
-    success: bool
-    order_id: str = ""
-    message: str = ""
+# PositionData, OrderResult classes removed - データ収集専用
 
 
 class MEXCWebSocketClient:
-    """MEXC Futures WebSocket全銘柄価格購読クライアント"""
+    """MEXC WebSocket価格データ収集クライアント（データ収集専用）"""
 
     def __init__(self, config: Config):
         self.config = config
