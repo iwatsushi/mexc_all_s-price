@@ -140,12 +140,20 @@ class MEXCDataCollector:
             current_time = datetime.now().strftime("%H:%M:%S.%f")[:-3]
             logger.debug(tickers)
 
-            # 🕒 レイテンシ計算（最初のティッカーのタイムスタンプと比較）
+            # 🕒 レイテンシ計算（最新のティッカータイムスタンプと比較）
             latency_info = ""
-            if tickers and len(tickers) > 0 and isinstance(tickers[0], dict):
-                first_ticker = tickers[0]
-                mexc_timestamp = first_ticker.get("timestamp")
-                if mexc_timestamp:
+            if tickers and len(tickers) > 0:
+                # 🚀 最新のタイムスタンプを検索（最も新しいデータ時刻）
+                latest_timestamp = 0
+                valid_timestamps = 0
+                for ticker in tickers:
+                    if isinstance(ticker, dict):
+                        ts = ticker.get("timestamp")
+                        if ts:
+                            latest_timestamp = max(latest_timestamp, int(ts))
+                            valid_timestamps += 1
+                
+                if latest_timestamp > 0 and valid_timestamps > 0:
                     if ws_receive_time is not None:
                         # 🚀 WebSocket受信直後のwall clock timeを直接使用
                         receive_time_ms = int(ws_receive_time * 1000)
@@ -154,10 +162,14 @@ class MEXCDataCollector:
                         # フォールバック：現在時刻を使用
                         receive_time_ms = int(time.time() * 1000)
                         time_source = "callback"
-
-                    mexc_time_ms = int(mexc_timestamp)
-                    latency_ms = receive_time_ms - mexc_time_ms
-                    latency_info = f" | ⏱️ Latency: {latency_ms}ms ({time_source})"
+                    
+                    # 🔍 デバッグ: タイムスタンプの値を確認
+                    logger.debug(f"🔍 Latest MEXC timestamp: {latest_timestamp}")
+                    logger.debug(f"🔍 Receive time: {ws_receive_time} -> {receive_time_ms}ms")
+                    logger.debug(f"🔍 Valid timestamps in batch: {valid_timestamps}/{len(tickers)}")
+                    
+                    latency_ms = receive_time_ms - latest_timestamp
+                    latency_info = f" | ⏱️ Latency: {latency_ms}ms ({time_source}, latest)"
 
             logger.info(
                 f"📨 [{current_time}] Batch #{self.stats['batches_received']}: {len(tickers)} tickers received{latency_info}"

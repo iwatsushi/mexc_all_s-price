@@ -33,7 +33,7 @@ questdb:
 
 # ログ設定
 logging:
-    level: "INFO"
+    level: "DEBUG"
     file: "data_collector.log"
     max_size_mb: 10
     backup_count: 5
