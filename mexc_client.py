@@ -54,8 +54,8 @@ class MEXCWebSocketClient:
         self._reconnect_attempts = 0
         self._max_reconnect_attempts = 5
 
-        # デバッグフラグ
-        self._debug_interval_stats = True
+        # デバッグフラグ（CPU負荷軽減のため無効化）
+        self._debug_interval_stats = False
 
         # ping管理（受信ループ内で実行）
         self._last_ping_time = 0
@@ -185,9 +185,7 @@ class MEXCWebSocketClient:
             last_recv = time.monotonic()  # デバッグスクリプトと同じ単調時間を使用
             message_count = 0
 
-            # 📊 受信間隔測定用（ChatGPT5提案）
-            last_ticker_time = None
-            ticker_intervals = []
+            # 📊 受信間隔測定用（CPU負荷軽減のため無効化）
 
             logger.info("🔄 Starting WebSocket message receive loop...")
 
@@ -199,7 +197,6 @@ class MEXCWebSocketClient:
                 logger.debug("🔄 Entered main receive loop")
                 try:
                     # タイムアウト付きでメッセージを受信（高速化のため短縮）
-                    logger.debug("📥 Waiting for WebSocket message...")
                     raw_message = await asyncio.wait_for(websocket.recv(), timeout=0.1)
                     rx_time_wall = time.time()  # 📊 受信直後の時刻（wall clock time）
                     rx_time_mono = time.monotonic()  # monotonic time（統計用）
@@ -207,37 +204,13 @@ class MEXCWebSocketClient:
                     message_count += 1
 
                     # 🚀 ChatGPT5提案: 受信直後は生データをキューに投入のみ
-                    logger.debug(
-                        f"💬 Raw message #{message_count} received: {len(raw_message)} chars"
-                    )
 
-                    # 📊 受信間隔測定（デバッグ時のみ）
-                    if self._debug_interval_stats:
-                        if last_ticker_time is not None:
-                            interval = rx_time_mono - last_ticker_time
-                            ticker_intervals.append(interval)
-
-                            # 統計ログ（10回毎）
-                            if len(ticker_intervals) % 10 == 0:
-                                recent_intervals = ticker_intervals[-10:]
-                                avg_interval = sum(recent_intervals) / len(
-                                    recent_intervals
-                                )
-                                min_interval = min(recent_intervals)
-                                max_interval = max(recent_intervals)
-                                logger.info(
-                                    f"📊 Arrival interval stats (last 10): avg={avg_interval:.3f}s, "
-                                    f"min={min_interval:.3f}s, max={max_interval:.3f}s"
-                                )
-                        last_ticker_time = rx_time_mono
+                    # 📊 受信間隔測定（CPU負荷軽減のため無効化）
 
                     # 🚀 超軽量処理：生データを直接解凍してコールバック呼び出し
                     if self.batch_callback:
                         self._process_ticker_batch_safe(raw_message, rx_time_wall)
-                    else:
-                        logger.debug(
-                            f"⚠️ No batch callback configured, dropping message #{message_count}"
-                        )
+                    # バッチコールバックがない場合は静かにドロップ
 
                     # 💓 ping処理は_process_ticker_batch_safe内で統一実行
 
@@ -250,10 +223,7 @@ class MEXCWebSocketClient:
                         )
                         # 再接続をトリガーするために例外を発生
                         raise websockets.exceptions.ConnectionClosed(None, None)
-                    elif since > 4:  # 4秒以上でDEBUGログ
-                        logger.info(
-                            f"⏰ WebSocket timeout check: {since:.1f}s since last message (total_messages: {message_count})"
-                        )
+                    # 4秒以上のログはCPU負荷軽減のため削除
 
                     # ping専用プロセスが接続維持を担当するため、ここでは何もしない
 
@@ -391,7 +361,6 @@ class MEXCWebSocketClient:
             return
 
         # 📊 統計のみ（瞬時）
-        logger.debug(f"🚀 Fast processing {len(tickers)} tickers (legacy mode)")
         processed_count = 0
 
         # バッチ受信時刻をフォールバック用に取得（ナノ秒単位）
@@ -442,8 +411,7 @@ class MEXCWebSocketClient:
                         # エラーログは出すが、WebSocket受信は継続
                         logger.error(f"Error in tick callback for {symbol}: {e}")
 
-        if processed_count > 0:
-            logger.debug(f"✅ Fast processed {processed_count} ticks (legacy mode)")
+        # 処理完了（ログはパフォーマンス優先のため削除）
 
     def _process_ticker_data(self, tickers):
         """従来のティッカーデータ処理（互換性維持）"""

@@ -27,9 +27,9 @@ class QuestDBClient:
 
         self.tick_table = config.tick_table_name
 
-        # バッファリング設定
-        self.batch_size = 100
-        self.flush_interval = 5.0  # 秒
+        # バッファリング設定（パフォーマンス最適化）
+        self.batch_size = 200  # バッチサイズを増大
+        self.flush_interval = 3.0  # フラッシュ間隔を短縮
 
         # バッファ
         self.tick_buffer: Queue = Queue()
@@ -71,9 +71,8 @@ class QuestDBClient:
                     return True
                 else:
                     if attempt < max_retries - 1:
-                        logger.debug(
-                            f"QuestDB接続試行{attempt + 1}回目失敗: {result}, {retry_delay}秒後に再試行..."
-                        )
+                        # 接続試行失敗ログをCPU負荷軽減のため削減
+                        pass
                         time.sleep(retry_delay)
                     else:
                         logger.warning(
@@ -83,9 +82,8 @@ class QuestDBClient:
 
             except Exception as e:
                 if attempt < max_retries - 1:
-                    logger.debug(
-                        f"QuestDB connection attempt {attempt + 1} error: {e}, retrying in {retry_delay}s..."
-                    )
+                    # エラーログをCPU負荷軽減のため削減
+                    pass
                     time.sleep(retry_delay)
                 else:
                     logger.warning(
@@ -216,7 +214,7 @@ class QuestDBClient:
             # 一括でキューに追加（従来の方式より圧倒的に効率的）
             for tick in ticks:
                 self.tick_buffer.put_nowait(tick)
-            logger.debug(f"Batch queued {len(ticks)} ticks for QuestDB")
+            # バッチキューログをCPU負荷軽減のため削除
         except Exception as e:
             logger.error(f"Error queuing batch tick data: {e}")
 
@@ -242,9 +240,7 @@ class QuestDBClient:
                 self.stats["ticks_saved"] += len(ilp_lines)
                 self.stats["last_flush"] = datetime.now()
 
-                logger.debug(
-                    f"✅ QuestDB ILP: {len(ilp_lines)} records sent successfully"
-                )
+                # ILP送信成功ログをCPU負荷軽減のため削除
                 return len(ilp_lines)
             else:
                 logger.warning(

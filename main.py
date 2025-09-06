@@ -205,8 +205,8 @@ class MEXCDataCollector:
 
             duration = time.time() - start_time
 
-            # ログ頻度を下げる（パフォーマンス優先）
-            if batch_id % 5 == 0:  # 5回に1回のみログ
+            # ログ頻度を大幅削減（パフォーマンス優先）
+            if batch_id % 20 == 0:  # 20回に1回のみログ
                 logger.info(
                     f"⚡ Fast batch #{batch_id}: {saved_count} saved in {duration:.3f}s"
                 )
@@ -274,7 +274,7 @@ class MEXCDataCollector:
                 "✅ MEXC Data Collector稼働中。停止は Ctrl+C を押してください。"
             )
 
-            # 統計表示タイマー開始
+            # 統計表示タイマー開始（頻度削減）
             asyncio.create_task(self._stats_timer())
 
             # メインループ（効率的な待機） - シャットダウンイベントを待機
@@ -289,7 +289,7 @@ class MEXCDataCollector:
         """統計表示タイマー"""
         while self.running:
             try:
-                await asyncio.sleep(30)  # 30秒間隔
+                await asyncio.sleep(60)  # 60秒間隔に変更（CPU負荷軽減）
                 if self.running:
                     self._show_stats()
             except Exception as e:
@@ -354,9 +354,6 @@ class MEXCDataCollector:
                 logger.info("Shutting down QuestDB client...")
                 self.questdb_client.shutdown()
 
-            if self.data_manager:
-                logger.info("Shutting down data manager...")
-                self.data_manager.shutdown()
 
             logger.info("MEXC Data Collector shutdown completed")
 
@@ -372,9 +369,6 @@ class MEXCDataCollector:
                 "running": self.running,
                 "uptime_hours": uptime / 3600,
                 "stats": self.stats,
-                "data_manager": (
-                    self.data_manager.get_stats() if self.data_manager else {}
-                ),
                 "questdb": (
                     self.questdb_client.get_stats() if self.questdb_client else {}
                 ),
