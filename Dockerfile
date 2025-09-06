@@ -21,6 +21,7 @@ COPY mexc_client.py .
 COPY questdb_client.py .
 COPY main.py .
 COPY config.yml .
+COPY mexc_minimal_receiver.py .
 
 # ログディレクトリ作成
 RUN mkdir -p /app/logs
