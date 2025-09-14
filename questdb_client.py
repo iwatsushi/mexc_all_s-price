@@ -26,6 +26,7 @@ class QuestDBClient:
         self.ilp_port = config.questdb_ilp_port
 
         self.tick_table = config.tick_table_name
+        self.symbol_table = config.get("symbol_table_name", "symbols")
 
         # バッファリング設定（パフォーマンス最適化）
         self.batch_size = 200  # バッチサイズを増大
@@ -243,6 +244,45 @@ class QuestDBClient:
             logger.error(f"Error sending ILP lines to QuestDB: {e}")
             return 0
 
+    def save_symbol_info(self, symbols: Dict[str, Any]) -> int:
+        """
+        🏷️ 銘柄情報をQuestDBに保存
+        
+        Args:
+            symbols: 銘柄情報の辞書
+        
+        Returns:
+            保存成功した件数
+        """
+        try:
+            if not symbols:
+                return 0
+            
+            ilp_lines = []
+            current_time_ns = int(time.time() * 1_000_000_000)
+            
+            for symbol, info in symbols.items():
+                # ILP形式: table,tag1=value1 field1=value1,field2=value2 timestamp
+                line = (
+                    f"{self.symbol_table},symbol={symbol} "
+                    f"mexc_available={str(info.mexc_available).lower()},"
+                    f"bybit_available={str(info.bybit_available).lower()} "
+                    f"{current_time_ns}"
+                )
+                ilp_lines.append(line)
+            
+            # 直接送信
+            if self._send_ilp_data("\n".join(ilp_lines) + "\n"):
+                logger.info(f"🏷️ QuestDB: {len(symbols)}銘柄情報を保存")
+                return len(symbols)
+            else:
+                logger.warning(f"❌ QuestDB: 銘柄情報保存失敗")
+                return 0
+                
+        except Exception as e:
+            logger.error(f"Error saving symbol info to QuestDB: {e}")
+            return 0
+
     def create_tables(self):
         """QuestDBテーブル作成SQL生成（手動実行用）"""
         try:
@@ -255,9 +295,20 @@ class QuestDBClient:
                 timestamp TIMESTAMP
             ) TIMESTAMP(timestamp) PARTITION BY DAY;
             """
+            
+            # 銘柄管理テーブル
+            symbol_table_sql = f"""
+            CREATE TABLE {self.symbol_table} (
+                symbol SYMBOL,
+                mexc_available BOOLEAN,
+                bybit_available BOOLEAN,
+                timestamp TIMESTAMP
+            ) TIMESTAMP(timestamp) PARTITION BY DAY;
+            """
 
             logger.info("Table creation SQL prepared (manual execution required)")
             logger.info(f"Tick table SQL: {tick_table_sql}")
+            logger.info(f"Symbol table SQL: {symbol_table_sql}")
 
         except Exception as e:
             logger.error(f"Error creating table SQL: {e}")

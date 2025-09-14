@@ -1,5 +1,6 @@
 # Web関連（データ収集専用）
 websockets>=11.0.3
+aiohttp>=3.8.5
 
 # 設定・YAML
 pyyaml>=6.0.1

@@ -30,10 +30,19 @@ questdb:
 
     # テーブル名
     tick_table: "tick_data"
+    symbol_table: "symbols"
+
+# 銘柄管理設定
+symbols:
+    # 銘柄同期間隔（秒）
+    sync_interval: 600 # 10分毎
+
+    # 初期同期を有効化
+    enable_initial_sync: true
 
 # ログ設定
 logging:
-    level: "INFO"
+    level: "DEBUG"
     file: "data_collector.log"
     max_size_mb: 10
     backup_count: 5

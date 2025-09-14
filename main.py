@@ -20,6 +20,7 @@ logger = loguru_logger
 from config import Config
 from mexc_client import MEXCClient, TickData
 from questdb_client import QuestDBClient
+from symbol_manager import SymbolManager
 
 
 class MEXCDataCollector:
@@ -41,6 +42,7 @@ class MEXCDataCollector:
         # コンポーネント
         self.mexc_client = None
         self.questdb_client = None
+        self.symbol_manager = None
 
         # 実行制御
         self.running = False
@@ -114,6 +116,11 @@ class MEXCDataCollector:
             # QuestDB クライアント
             self.questdb_client = QuestDBClient(self.config)
             logger.info("QuestDBクライアント作成完了")
+            
+            # 銘柄管理システム
+            self.symbol_manager = SymbolManager(self.config)
+            await self.symbol_manager.initialize()
+            logger.info("銘柄管理システム作成完了")
 
             # MEXC WebSocket 接続
             if not await self.mexc_client.start():
@@ -126,6 +133,11 @@ class MEXCDataCollector:
             if not await self.mexc_client.subscribe_all_tickers():
                 raise Exception("Failed to subscribe to all tickers")
 
+            # 初期銘柄同期
+            if self.config.get("symbols.enable_initial_sync", True):
+                logger.info("🔄 初期銘柄同期実行中...")
+                await self._perform_symbol_sync()
+            
             logger.info("✅ 全コンポーネントの初期化成功")
 
         except Exception as e:
@@ -218,6 +230,9 @@ class MEXCDataCollector:
 
             # 統計表示タイマー開始（頻度削減）
             asyncio.create_task(self._stats_timer())
+            
+            # 銘柄同期タイマー開始
+            asyncio.create_task(self._symbol_sync_timer())
 
             # メインループ（効率的な待機） - シャットダウンイベントを待機
             await self.shutdown_event.wait()
@@ -246,6 +261,33 @@ class MEXCDataCollector:
             
         except Exception as e:
             logger.error(f"Stats error: {e}")
+    
+    async def _symbol_sync_timer(self):
+        """銘柄同期タイマー"""
+        while self.running:
+            try:
+                await asyncio.sleep(300)  # 5分間隔でチェック
+                if self.running and self.symbol_manager and self.symbol_manager.should_sync():
+                    await self._perform_symbol_sync()
+            except Exception as e:
+                logger.error(f"Symbol sync timer error: {e}")
+
+    async def _perform_symbol_sync(self):
+        """銘柄同期実行"""
+        try:
+            if not self.symbol_manager:
+                return
+                
+            # 銘柄同期実行
+            symbols = await self.symbol_manager.sync_symbols()
+            
+            if symbols:
+                # QuestDBに保存
+                saved_count = self.questdb_client.save_symbol_info(symbols)
+                logger.info(f"🏷️ {len(symbols)}銘柄の情報を同期、{saved_count}件をQuestDBに保存")
+                
+        except Exception as e:
+            logger.error(f"Symbol sync error: {e}")
 
     def _setup_signal_handlers(self):
         """シグナルハンドラー設定"""
@@ -281,6 +323,10 @@ class MEXCDataCollector:
             if self.questdb_client:
                 logger.info("Shutting down QuestDB client...")
                 self.questdb_client.shutdown()
+                
+            if self.symbol_manager:
+                logger.info("Shutting down symbol manager...")
+                await self.symbol_manager.shutdown()
 
 
             logger.info("MEXC Data Collector shutdown completed")
@@ -299,6 +345,9 @@ class MEXCDataCollector:
                 "stats": self.stats,
                 "questdb": (
                     self.questdb_client.get_stats() if self.questdb_client else {}
+                ),
+                "symbols": (
+                    self.symbol_manager.get_stats() if self.symbol_manager else {}
                 ),
             }
         except Exception as e:

@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY config.py .
 COPY mexc_client.py .
 COPY questdb_client.py .
+COPY symbol_manager.py .
 COPY main.py .
 COPY config.yml .
 COPY mexc_minimal_receiver.py .
