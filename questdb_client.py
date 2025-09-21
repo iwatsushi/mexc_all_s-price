@@ -35,6 +35,12 @@ class QuestDBClient:
         # バッファ
         self.tick_buffer: Queue = Queue()
 
+        # 持続接続用ソケット
+        self._connection_socket = None
+        self._connection_lock = threading.Lock()
+        self._last_connection_time = 0
+        self._connection_timeout = 30.0  # 30秒でソケットを再作成
+
         # ワーカースレッド
         self.running = True
         self.tick_worker_thread = None
@@ -101,34 +107,75 @@ class QuestDBClient:
 
         logger.info("🚀 QuestDBワーカースレッド開始（ティックデータのみ）")
 
+    def _get_connection(self) -> socket.socket:
+        """持続接続を取得または作成"""
+        with self._connection_lock:
+            current_time = time.time()
+
+            # 既存の接続が有効かチェック
+            if (self._connection_socket is not None and
+                current_time - self._last_connection_time < self._connection_timeout):
+                return self._connection_socket
+
+            # 古い接続を閉じる
+            if self._connection_socket is not None:
+                try:
+                    self._connection_socket.close()
+                except:
+                    pass
+
+            # 新しい接続を作成
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5.0)
+            sock.connect((self.host, self.ilp_port))
+
+            self._connection_socket = sock
+            self._last_connection_time = current_time
+
+            return sock
+
     def _send_ilp_data(self, data: str) -> bool:
-        """ILPデータをQuestDBに送信（リトライ機能付き）"""
+        """ILPデータをQuestDBに送信（持続接続使用）"""
         max_retries = 3
-        retry_delay = 1
+        base_delay = 0.1
 
         for attempt in range(max_retries):
             try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(10.0)
-                sock.connect((self.host, self.ilp_port))
+                # 持続接続を取得
+                sock = self._get_connection()
                 sock.sendall(data.encode("utf-8"))
-                sock.close()
 
                 # 成功時はエラーカウントをリセット
-                # 接続復旧ログをCPU負荷軽減のため削除
                 self.stats["write_errors"] = 0
-
                 return True
 
-            except Exception as e:
+            except (ConnectionRefusedError, OSError, socket.error) as e:
+                # 接続エラーの場合、持続接続をリセットしてリトライ
+                with self._connection_lock:
+                    if self._connection_socket is not None:
+                        try:
+                            self._connection_socket.close()
+                        except:
+                            pass
+                        self._connection_socket = None
+
                 if attempt < max_retries - 1:
+                    retry_delay = base_delay * (2 ** attempt)
                     time.sleep(retry_delay)
+                    continue
                 else:
                     # 最終試行失敗時のみエラーログ（頻度削減）
                     self.stats["write_errors"] += 1
-                    if self.stats["write_errors"] % 20 == 1:  # エラーログをさらに削減
-                        logger.warning(f"QuestDB connection failed (#{self.stats['write_errors']}): {type(e).__name__}: {e}")
+                    if self.stats["write_errors"] % 100 == 1:  # エラーログ頻度をさらに削減
+                        logger.warning(f"QuestDB persistent connection failed after {max_retries} retries (#{self.stats['write_errors']}): {type(e).__name__}")
                     return False
+
+            except Exception as e:
+                # その他の例外は即座に失敗
+                self.stats["write_errors"] += 1
+                if self.stats["write_errors"] % 200 == 1:
+                    logger.error(f"QuestDB unexpected error (#{self.stats['write_errors']}): {type(e).__name__}: {e}")
+                return False
 
         return False
 
@@ -339,6 +386,15 @@ class QuestDBClient:
         # ワーカースレッドの終了を待機
         if self.tick_worker_thread and self.tick_worker_thread.is_alive():
             self.tick_worker_thread.join(timeout=10.0)
+
+        # 持続接続を閉じる
+        with self._connection_lock:
+            if self._connection_socket is not None:
+                try:
+                    self._connection_socket.close()
+                except:
+                    pass
+                self._connection_socket = None
 
         # 残りのバッファを処理
         self.flush_all()
