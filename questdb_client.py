@@ -34,16 +34,16 @@ class QuestDBClient:
 
         # バッファ
         self.tick_buffer: Queue = Queue()
+        self.ilp_write_queue: Queue = Queue()  # 専用ILPワーカー用キュー
 
-        # 持続接続用ソケット
-        self._connection_socket = None
+        # 持続接続用ソケット（ILPワーカー専用）
+        self._ilp_connection = None
         self._connection_lock = threading.Lock()
-        self._last_connection_time = 0
-        self._connection_timeout = 30.0  # 30秒でソケットを再作成
 
         # ワーカースレッド
         self.running = True
         self.tick_worker_thread = None
+        self.ilp_worker_thread = None  # 専用ILPワーカー
 
         # 統計（最小限）
         self.stats = {
@@ -100,22 +100,35 @@ class QuestDBClient:
 
     def _start_workers(self):
         """ワーカースレッド開始"""
+        # ティックデータワーカー
         self.tick_worker_thread = threading.Thread(
             target=self._tick_worker, daemon=True, name="questdb_tick_worker"
         )
         self.tick_worker_thread.start()
 
-        logger.info("🚀 QuestDBワーカースレッド開始（ティックデータのみ）")
+        # 専用ILPワーカー
+        self.ilp_worker_thread = threading.Thread(
+            target=self._ilp_worker, daemon=True, name="questdb_ilp_worker"
+        )
+        self.ilp_worker_thread.start()
+
+        logger.info("🚀 QuestDBワーカースレッド開始（ティック＋専用ILP）")
 
     def _get_connection(self) -> socket.socket:
-        """持続接続を取得または作成"""
+        """持続接続を取得または作成（スレッドセーフ）"""
         with self._connection_lock:
             current_time = time.time()
 
             # 既存の接続が有効かチェック
             if (self._connection_socket is not None and
                 current_time - self._last_connection_time < self._connection_timeout):
-                return self._connection_socket
+                try:
+                    # 接続の生存確認
+                    self._connection_socket.settimeout(1.0)
+                    return self._connection_socket
+                except (socket.error, OSError):
+                    # 接続が無効になっている場合
+                    self._connection_socket = None
 
             # 古い接続を閉じる
             if self._connection_socket is not None:
@@ -123,61 +136,109 @@ class QuestDBClient:
                     self._connection_socket.close()
                 except:
                     pass
+                self._connection_socket = None
 
-            # 新しい接続を作成
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(5.0)
-            sock.connect((self.host, self.ilp_port))
+            # 新しい接続を作成（複数回リトライ）
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(5.0)
+                    sock.connect((self.host, self.ilp_port))
 
-            self._connection_socket = sock
-            self._last_connection_time = current_time
+                    self._connection_socket = sock
+                    self._last_connection_time = current_time
 
-            return sock
+                    return sock
 
-    def _send_ilp_data(self, data: str) -> bool:
-        """ILPデータをQuestDBに送信（持続接続使用）"""
-        max_retries = 3
-        base_delay = 0.1
+                except (ConnectionRefusedError, OSError) as e:
+                    if attempt < max_retries - 1:
+                        time.sleep(0.1 * (2 ** attempt))  # 指数バックオフ
+                        continue
+                    else:
+                        # 最終的に失敗した場合、例外を再発生
+                        raise e
 
-        for attempt in range(max_retries):
+            # ここには到達しないはずだが、安全のため
+            raise ConnectionError("Failed to establish persistent connection")
+
+    def _ilp_worker(self):
+        """専用ILPワーカー - 一つの永続接続で全ILP送信を処理"""
+        logger.info("📡 専用ILPワーカー開始 - 永続接続によるデータ送信")
+
+        connection = None
+        reconnect_attempts = 0
+        max_reconnect_attempts = 10
+
+        while self.running:
             try:
-                # 持続接続を取得
-                sock = self._get_connection()
-                sock.sendall(data.encode("utf-8"))
+                # 接続確立
+                if connection is None:
+                    try:
+                        connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        connection.settimeout(10.0)
+                        connection.connect((self.host, self.ilp_port))
+                        reconnect_attempts = 0
+                        logger.info("🔗 ILP永続接続確立成功")
+                    except Exception as e:
+                        reconnect_attempts += 1
+                        if reconnect_attempts <= max_reconnect_attempts:
+                            wait_time = min(0.5 * (2 ** reconnect_attempts), 10.0)
+                            logger.warning(f"ILP接続失敗 (試行{reconnect_attempts}/{max_reconnect_attempts}): {wait_time:.1f}秒後リトライ")
+                            time.sleep(wait_time)
+                            continue
+                        else:
+                            logger.error(f"ILP接続失敗が続きます。60秒後に再試行します。")
+                            time.sleep(60.0)
+                            reconnect_attempts = 0
+                            continue
 
-                # 成功時はエラーカウントをリセット
-                self.stats["write_errors"] = 0
-                return True
+                # キューからデータを取得
+                try:
+                    ilp_data = self.ilp_write_queue.get(timeout=1.0)
 
-            except (ConnectionRefusedError, OSError, socket.error) as e:
-                # 接続エラーの場合、持続接続をリセットしてリトライ
-                with self._connection_lock:
-                    if self._connection_socket is not None:
+                    # データ送信
+                    connection.sendall(ilp_data.encode('utf-8'))
+                    self.stats["write_errors"] = 0  # 成功時はエラーカウントリセット
+
+                except Empty:
+                    continue
+                except (socket.error, OSError, ConnectionError) as e:
+                    logger.warning(f"ILP送信エラー、接続をリセット: {type(e).__name__}")
+                    if connection:
                         try:
-                            self._connection_socket.close()
+                            connection.close()
                         except:
                             pass
-                        self._connection_socket = None
-
-                if attempt < max_retries - 1:
-                    retry_delay = base_delay * (2 ** attempt)
-                    time.sleep(retry_delay)
+                        connection = None
+                    # データを再キューに戻す
+                    try:
+                        self.ilp_write_queue.put_nowait(ilp_data)
+                    except:
+                        pass
                     continue
-                else:
-                    # 最終試行失敗時のみエラーログ（頻度削減）
-                    self.stats["write_errors"] += 1
-                    if self.stats["write_errors"] % 100 == 1:  # エラーログ頻度をさらに削減
-                        logger.warning(f"QuestDB persistent connection failed after {max_retries} retries (#{self.stats['write_errors']}): {type(e).__name__}")
-                    return False
 
             except Exception as e:
-                # その他の例外は即座に失敗
-                self.stats["write_errors"] += 1
-                if self.stats["write_errors"] % 200 == 1:
-                    logger.error(f"QuestDB unexpected error (#{self.stats['write_errors']}): {type(e).__name__}: {e}")
-                return False
+                logger.error(f"ILPワーカー予期しないエラー: {e}")
+                time.sleep(1.0)
 
-        return False
+        # 終了時の接続クリーンアップ
+        if connection:
+            try:
+                connection.close()
+            except:
+                pass
+
+        logger.info("🛑 専用ILPワーカー停止")
+
+    def _send_ilp_data(self, data: str) -> bool:
+        """ILPデータを専用ワーカーキューに送信"""
+        try:
+            self.ilp_write_queue.put_nowait(data)
+            return True
+        except Exception as e:
+            logger.error(f"ILPキューへの送信失敗: {e}")
+            return False
 
     def _tick_worker(self):
         """ティックデータワーカー"""
@@ -387,14 +448,17 @@ class QuestDBClient:
         if self.tick_worker_thread and self.tick_worker_thread.is_alive():
             self.tick_worker_thread.join(timeout=10.0)
 
+        if self.ilp_worker_thread and self.ilp_worker_thread.is_alive():
+            self.ilp_worker_thread.join(timeout=10.0)
+
         # 持続接続を閉じる
         with self._connection_lock:
-            if self._connection_socket is not None:
+            if self._ilp_connection is not None:
                 try:
-                    self._connection_socket.close()
+                    self._ilp_connection.close()
                 except:
                     pass
-                self._connection_socket = None
+                self._ilp_connection = None
 
         # 残りのバッファを処理
         self.flush_all()
