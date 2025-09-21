@@ -127,7 +127,7 @@ class QuestDBClient:
                     # 最終試行失敗時のみエラーログ（頻度削減）
                     self.stats["write_errors"] += 1
                     if self.stats["write_errors"] % 20 == 1:  # エラーログをさらに削減
-                        logger.warning(f"QuestDB connection failed (#{self.stats['write_errors']})")
+                        logger.warning(f"QuestDB connection failed (#{self.stats['write_errors']}): {type(e).__name__}: {e}")
                     return False
 
         return False
@@ -241,7 +241,7 @@ class QuestDBClient:
                 return 0
 
         except Exception as e:
-            logger.error(f"Error sending ILP lines to QuestDB: {e}")
+            logger.error(f"Error sending ILP lines to QuestDB: {type(e).__name__}: {e}")
             return 0
 
     def save_symbol_info(self, symbols: Dict[str, Any]) -> int:
@@ -278,9 +278,9 @@ class QuestDBClient:
             else:
                 logger.warning(f"❌ QuestDB: 銘柄情報保存失敗")
                 return 0
-                
+
         except Exception as e:
-            logger.error(f"Error saving symbol info to QuestDB: {e}")
+            logger.error(f"Error saving symbol info to QuestDB: {type(e).__name__}: {e}")
             return 0
 
     def create_tables(self):
