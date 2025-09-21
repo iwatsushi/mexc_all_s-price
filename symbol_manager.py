@@ -77,6 +77,8 @@ class SymbolInfo:
     symbol: str
     mexc_available: bool = False
     bybit_available: bool = False
+    mexc_symbol: str = None  # MEXC元銘柄名
+    bybit_symbol: str = None  # Bybit元銘柄名
     updated_at: datetime = None
 
 
@@ -94,6 +96,9 @@ class SymbolManager:
         # キャッシュ
         self.current_symbols: Dict[str, SymbolInfo] = {}
         self.last_sync_time = None
+
+        # Bybit銘柄の元の名前とのマッピング
+        self.bybit_symbol_mapping: Dict[str, str] = {}
 
         # 同期間隔（秒）
         self.sync_interval = config.get(
@@ -125,30 +130,41 @@ class SymbolManager:
         else:
             # その他の場合はそのまま返す
             return bybit_symbol
-    
+
+
     def normalize_symbols(self, mexc_symbols: Set[str], bybit_symbols: Set[str]) -> Dict[str, SymbolInfo]:
         """
         両取引所の銘柄を正規化してマッピング統合
-        
+
         Args:
             mexc_symbols: MEXC形式の銘柄セット (例: BTC_USDT)
             bybit_symbols: 既にMEXC形式に変換済みのBybit銘柄セット (例: BTC_USDT)
-            
+
         Returns:
             正規化された銘柄情報の辞書（MEXC形式の銘柄名をキーとする）
         """
         normalized_symbols = {}
         current_time = datetime.now()
-        
+
         # 全銘柄リストを作成（MEXC形式で統一済み）
         all_symbols = mexc_symbols | bybit_symbols
-        
+
         # 各銘柄について両取引所での取引可否をチェック
         for symbol in all_symbols:
+            # MEXC銘柄名（既にMEXC形式）
+            mexc_symbol = symbol if symbol in mexc_symbols else None
+
+            # Bybit銘柄名をマッピングテーブルから取得
+            bybit_symbol = None
+            if symbol in bybit_symbols:
+                bybit_symbol = self.bybit_symbol_mapping.get(symbol)
+
             symbol_info = SymbolInfo(
                 symbol=symbol,
                 mexc_available=(symbol in mexc_symbols),
                 bybit_available=(symbol in bybit_symbols),
+                mexc_symbol=mexc_symbol,
+                bybit_symbol=bybit_symbol,
                 updated_at=current_time
             )
             normalized_symbols[symbol] = symbol_info
@@ -231,6 +247,9 @@ class SymbolManager:
         try:
             logger.info("📡 Bybit銘柄一覧取得中...")
 
+            # 元の銘柄名とのマッピングをクリア
+            self.bybit_symbol_mapping = {}
+
             # USDT建て先物を取得
             params = {"category": "linear", "limit": 1000}
 
@@ -245,13 +264,15 @@ class SymbolManager:
                 symbols = set()
 
                 for symbol_info in data.get("result", {}).get("list", []):
-                    symbol = symbol_info.get("symbol", "")
+                    original_symbol = symbol_info.get("symbol", "")
                     status = symbol_info.get("status", "")
 
-                    if symbol.endswith("USDT") and status == "Trading":
+                    if original_symbol.endswith("USDT") and status == "Trading":
                         # Bybit銘柄をMEXC形式に変換（特殊マッピング適用）
-                        mexc_format_symbol = self.map_bybit_to_mexc(symbol)
+                        mexc_format_symbol = self.map_bybit_to_mexc(original_symbol)
                         symbols.add(mexc_format_symbol)
+                        # マッピングを保存：正規化された銘柄名 -> 元のBybit銘柄名
+                        self.bybit_symbol_mapping[mexc_format_symbol] = original_symbol
 
                 logger.info(f"✅ Bybit: {len(symbols)}銘柄を取得")
                 return symbols

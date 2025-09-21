@@ -232,10 +232,16 @@ class QuestDBClient:
             
             for symbol, info in symbols.items():
                 # ILP形式: table,tag1=value1 field1=value1,field2=value2 timestamp
+                # MEXCとBybitの元銘柄名も保存
+                mexc_symbol = info.mexc_symbol or ""
+                bybit_symbol = info.bybit_symbol or ""
+
                 line = (
                     f"{self.symbol_table},symbol={symbol} "
                     f"mexc_available={str(info.mexc_available).lower()},"
-                    f"bybit_available={str(info.bybit_available).lower()} "
+                    f"bybit_available={str(info.bybit_available).lower()},"
+                    f"mexc_symbol=\"{mexc_symbol}\","
+                    f"bybit_symbol=\"{bybit_symbol}\" "
                     f"{current_time_ns}"
                 )
                 ilp_lines.append(line)
