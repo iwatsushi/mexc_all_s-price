@@ -218,26 +218,30 @@ class QuestDBClient:
 
     def save_symbol_info(self, symbols: Dict[str, Any]) -> int:
         """
-        🏷️ 銘柄情報をQuestDBに保存
-        
+        🏷️ 銘柄情報をQuestDBに保存（主キー的動作）
+
         Args:
             symbols: 銘柄情報の辞書
-        
+
         Returns:
             保存成功した件数
         """
         try:
             if not symbols:
                 return 0
-            
+
             ilp_lines = []
-            current_time_ns = int(time.time() * 1_000_000_000)
-            
+            base_time_ns = int(time.time() * 1_000_000_000)
+
+            # DEDUP UPSERT KEYSと組み合わせて重複除去を実現
             for symbol, info in symbols.items():
                 # ILP形式: table,tag1=value1 field1=value1,field2=value2 timestamp
                 # MEXCとBybitの元銘柄名も保存
                 mexc_symbol = info.mexc_symbol or ""
                 bybit_symbol = info.bybit_symbol or ""
+
+                # 同じタイムスタンプを使用（DEDUP UPSERT KEYSが重複除去）
+                unique_time_ns = base_time_ns
 
                 line = (
                     f"{self.symbol_table},symbol={symbol} "
@@ -245,7 +249,7 @@ class QuestDBClient:
                     f"bybit_available={str(info.bybit_available).lower()},"
                     f"mexc_symbol=\"{mexc_symbol}\","
                     f"bybit_symbol=\"{bybit_symbol}\" "
-                    f"{current_time_ns}"
+                    f"{unique_time_ns}"
                 )
                 ilp_lines.append(line)
             
