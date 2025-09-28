@@ -22,7 +22,7 @@ SYMBOL_MAPPING = {
     # MEXC → Bybit の変換
     # 1000倍表記の特殊ケース
     "SHIB_USDT": "1000SHIBUSDT",
-    "PEPE_USDT": "1000PEPEUSDT", 
+    "PEPE_USDT": "1000PEPEUSDT",
     "BONK_USDT": "1000BONKUSDT",
     "FLOKI_USDT": "1000FLOKIUSDT",
     "LUNC_USDT": "1000LUNCUSDT",
@@ -30,19 +30,14 @@ SYMBOL_MAPPING = {
     "TURBO_USDT": "1000TURBOUSDT",
     "RATS_USDT": "1000RATSUSDT",
     "SATS_USDT": "1000SATSUSDT",
-    
     # 名称変更・リブランディング
     "FILECOIN_USDT": "FILUSDT",
-    "LUNA_USDT": "LUNA2USDT", 
+    "LUNA_USDT": "LUNA2USDT",
     "POLYGON_USDT": "POLUSDT",
     "MATIC_USDT": "POLUSDT",
-    
     # 通貨単位の違い（USD → USDT変換）
-    "BTC_USD": "BTCUSDT",
-    "ETH_USD": "ETHUSDT", 
     "AVAX_USD": "AVAXUSDT",
     "LTC_USD": "LTCUSDT",
-    
     # その他の特殊ケース
     "RAY_USDT": "RAYDIUMUSDT",
     "UNI_USDT": "UNIUSDT",
@@ -57,7 +52,7 @@ ADDITIONAL_REVERSE_MAPPING = {
     # Bybit専用の特殊形式
     "1000SHIBUSDT": "SHIB_USDT",
     "1000PEPEUSDT": "PEPE_USDT",
-    "1000BONKUSDT": "BONK_USDT", 
+    "1000BONKUSDT": "BONK_USDT",
     "1000FLOKIUSDT": "FLOKI_USDT",
     "1000LUNCUSDT": "LUNC_USDT",
     "1000XECUSDT": "XEC_USDT",
@@ -110,30 +105,31 @@ class SymbolManager:
         # 特殊ケースのマッピングをチェック
         if mexc_symbol in SYMBOL_MAPPING:
             return SYMBOL_MAPPING[mexc_symbol]
-        
+
         # 基本変換：アンダースコアを削除 (BTC_USDT → BTCUSDT)
         return mexc_symbol.replace("_", "")
-    
+
     def map_bybit_to_mexc(self, bybit_symbol: str) -> str:
         """Bybit銘柄名をMEXC銘柄名に変換"""
         # 完全な逆マッピングをチェック（特殊ケースを含む）
         if bybit_symbol in COMPLETE_REVERSE_MAPPING:
             return COMPLETE_REVERSE_MAPPING[bybit_symbol]
-            
+
         # 基本逆変換：USDTの前にアンダースコア追加 (BTCUSDT → BTC_USDT)
         if bybit_symbol.endswith("USDT"):
             base = bybit_symbol[:-4]  # USDTを除去
             return f"{base}_USDT"
         elif bybit_symbol.endswith("USD"):
-            base = bybit_symbol[:-3]  # USDを除去
-            logger.warning(f"🔍 USD建て銘柄をマッピング: {bybit_symbol} -> {base}_USD")
-            return f"{base}_USD"
+            # USD建て銘柄は除外（USDT建てのみを対象とする）
+            logger.warning(f"🚫 USD建て銘柄をスキップ: {bybit_symbol}")
+            return None  # NoneでスキップするようにBybit処理を修正必要
         else:
             # その他の場合はそのまま返す
             return bybit_symbol
 
-
-    def normalize_symbols(self, mexc_symbols: Set[str], bybit_symbols: Set[str]) -> Dict[str, SymbolInfo]:
+    def normalize_symbols(
+        self, mexc_symbols: Set[str], bybit_symbols: Set[str]
+    ) -> Dict[str, SymbolInfo]:
         """
         両取引所の銘柄を正規化してマッピング統合
 
@@ -166,10 +162,10 @@ class SymbolManager:
                 bybit_available=(symbol in bybit_symbols),
                 mexc_symbol=mexc_symbol,
                 bybit_symbol=bybit_symbol,
-                updated_at=current_time
+                updated_at=current_time,
             )
             normalized_symbols[symbol] = symbol_info
-        
+
         logger.info(f"🔗 銘柄マッピング完了: {len(normalized_symbols)}銘柄を正規化")
         return normalized_symbols
 
@@ -270,19 +266,39 @@ class SymbolManager:
                     status = symbol_info.get("status", "")
 
                     # デバッグ：USD建て銘柄を検出
-                    if original_symbol.endswith("USD") and not original_symbol.endswith("USDT") and status == "Trading":
+                    if (
+                        original_symbol.endswith("USD")
+                        and not original_symbol.endswith("USDT")
+                        and status == "Trading"
+                    ):
                         usd_symbols.append(original_symbol)
 
+                    # USDT建て銘柄のみを処理（USD建ては除外）
                     if original_symbol.endswith("USDT") and status == "Trading":
                         # Bybit銘柄をMEXC形式に変換（特殊マッピング適用）
                         mexc_format_symbol = self.map_bybit_to_mexc(original_symbol)
-                        symbols.add(mexc_format_symbol)
-                        # マッピングを保存：正規化された銘柄名 -> 元のBybit銘柄名
-                        self.bybit_symbol_mapping[mexc_format_symbol] = original_symbol
+                        if (
+                            mexc_format_symbol is not None
+                        ):  # None（スキップ対象）でない場合のみ追加
+                            symbols.add(mexc_format_symbol)
+                            # マッピングを保存：正規化された銘柄名 -> 元のBybit銘柄名
+                            self.bybit_symbol_mapping[mexc_format_symbol] = (
+                                original_symbol
+                            )
+
+                    # USD建て銘柄を明示的に除外
+                    elif (
+                        original_symbol.endswith("USD")
+                        and not original_symbol.endswith("USDT")
+                        and status == "Trading"
+                    ):
+                        logger.warning(f"🚫 USD建て銘柄を除外: {original_symbol}")
 
                 # デバッグ：USD建て銘柄が見つかった場合ログ出力
                 if usd_symbols:
-                    logger.warning(f"🔍 Bybit USD建て銘柄を検出（除外済み）: {usd_symbols[:10]}...")
+                    logger.warning(
+                        f"🔍 Bybit USD建て銘柄を検出（除外済み）: {usd_symbols[:10]}..."
+                    )
 
                 logger.info(f"✅ Bybit: {len(symbols)}銘柄を取得")
                 return symbols
@@ -314,21 +330,31 @@ class SymbolManager:
             self.last_sync_time = datetime.now()
 
             duration = time.time() - start_time
-            
+
             # 統計情報
-            mexc_count = sum(1 for info in updated_symbols.values() if info.mexc_available)
-            bybit_count = sum(1 for info in updated_symbols.values() if info.bybit_available)
-            both_count = sum(1 for info in updated_symbols.values() if info.mexc_available and info.bybit_available)
-            
+            mexc_count = sum(
+                1 for info in updated_symbols.values() if info.mexc_available
+            )
+            bybit_count = sum(
+                1 for info in updated_symbols.values() if info.bybit_available
+            )
+            both_count = sum(
+                1
+                for info in updated_symbols.values()
+                if info.mexc_available and info.bybit_available
+            )
+
             # マッピング成功例をデバッグ表示
             successful_mappings = []
             for symbol, info in updated_symbols.items():
                 if info.mexc_available and info.bybit_available:
                     successful_mappings.append(symbol)
-            
+
             if successful_mappings:
-                logger.info(f"🔗 マッピング成功例: {successful_mappings[:10]}")  # 最初の10件を表示
-            
+                logger.info(
+                    f"🔗 マッピング成功例: {successful_mappings[:10]}"
+                )  # 最初の10件を表示
+
             logger.info(
                 f"✅ 銘柄同期完了: 総計{len(updated_symbols)}銘柄 "
                 f"(MEXC: {mexc_count}, Bybit: {bybit_count}, 両方: {both_count}), "
