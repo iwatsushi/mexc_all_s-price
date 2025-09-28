@@ -126,6 +126,7 @@ class SymbolManager:
             return f"{base}_USDT"
         elif bybit_symbol.endswith("USD"):
             base = bybit_symbol[:-3]  # USDを除去
+            logger.warning(f"🔍 USD建て銘柄をマッピング: {bybit_symbol} -> {base}_USD")
             return f"{base}_USD"
         else:
             # その他の場合はそのまま返す
@@ -263,9 +264,14 @@ class SymbolManager:
                 data = await response.json()
                 symbols = set()
 
+                usd_symbols = []  # デバッグ用
                 for symbol_info in data.get("result", {}).get("list", []):
                     original_symbol = symbol_info.get("symbol", "")
                     status = symbol_info.get("status", "")
+
+                    # デバッグ：USD建て銘柄を検出
+                    if original_symbol.endswith("USD") and not original_symbol.endswith("USDT") and status == "Trading":
+                        usd_symbols.append(original_symbol)
 
                     if original_symbol.endswith("USDT") and status == "Trading":
                         # Bybit銘柄をMEXC形式に変換（特殊マッピング適用）
@@ -273,6 +279,10 @@ class SymbolManager:
                         symbols.add(mexc_format_symbol)
                         # マッピングを保存：正規化された銘柄名 -> 元のBybit銘柄名
                         self.bybit_symbol_mapping[mexc_format_symbol] = original_symbol
+
+                # デバッグ：USD建て銘柄が見つかった場合ログ出力
+                if usd_symbols:
+                    logger.warning(f"🔍 Bybit USD建て銘柄を検出（除外済み）: {usd_symbols[:10]}...")
 
                 logger.info(f"✅ Bybit: {len(symbols)}銘柄を取得")
                 return symbols
