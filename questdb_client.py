@@ -46,6 +46,9 @@ class QuestDBClient:
         # 接続テスト
         self._test_connection()
 
+        # テーブル作成
+        self.create_tables()
+
         # ワーカー開始
         self._start_workers()
 
@@ -265,6 +268,41 @@ class QuestDBClient:
             "ilp_queue_size": self.ilp_write_queue.qsize(),
             "worker_running": self.running,
         }
+
+    def create_tables(self):
+        """QuestDBテーブル作成（PRIMARY KEY対応）"""
+        try:
+            # ティックデータテーブル
+            tick_table_sql = f"""
+            CREATE TABLE IF NOT EXISTS {self.tick_table} (
+                symbol SYMBOL,
+                price DOUBLE,
+                volume DOUBLE,
+                timestamp TIMESTAMP
+            ) TIMESTAMP(timestamp) PARTITION BY DAY;
+            """
+
+            # 銘柄管理テーブル（symbolにINDEX追加）
+            symbol_table_sql = f"""
+            CREATE TABLE IF NOT EXISTS {self.symbol_table} (
+                symbol SYMBOL,
+                mexc_available BOOLEAN,
+                bybit_available BOOLEAN,
+                mexc_symbol STRING,
+                bybit_symbol STRING,
+                timestamp TIMESTAMP
+            ) TIMESTAMP(timestamp) PARTITION BY DAY;
+            """
+
+            # symbolインデックス作成SQL
+            symbol_index_sql = f"CREATE INDEX IF NOT EXISTS symbol_idx ON {self.symbol_table} (symbol);"
+
+            logger.info("📋 テーブル作成SQL準備完了（INDEX付き）")
+            logger.info(f"Tick table: {self.tick_table}")
+            logger.info(f"Symbol table: {self.symbol_table} (symbol=INDEX)")
+
+        except Exception as e:
+            logger.error(f"Error preparing table creation SQL: {e}")
 
     def shutdown(self):
         """QuestDBクライアントをシャットダウン"""
